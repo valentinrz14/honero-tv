@@ -2,7 +2,6 @@ import React, {useState, useRef, useCallback} from 'react';
 import {
   View,
   Text,
-  TextInput,
   StyleSheet,
   Image,
   ActivityIndicator,
@@ -16,13 +15,20 @@ interface LoginScreenProps {
   onLoginSuccess: () => void;
 }
 
+const NUM_KEYS = [
+  ['1', '2', '3'],
+  ['4', '5', '6'],
+  ['7', '8', '9'],
+  ['del', '0', 'ok'],
+];
+
 export const LoginScreen: React.FC<LoginScreenProps> = ({onLoginSuccess}) => {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const inputRef = useRef<TextInput>(null);
   const shakeAnim = useRef(new Animated.Value(0)).current;
+  const [focusedKey, setFocusedKey] = useState<string | null>(null);
 
   const shake = useCallback(() => {
     Animated.sequence([
@@ -55,16 +61,51 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({onLoginSuccess}) => {
     }
   }, [code, onLoginSuccess, shake]);
 
-  const handleCodeChange = useCallback((text: string) => {
-    // Only allow digits, max 6
-    const digits = text.replace(/\D/g, '').slice(0, 6);
-    setCode(digits);
-    setError('');
-  }, []);
+  const handleKeyPress = useCallback(
+    (key: string) => {
+      if (loading) return;
+
+      if (key === 'del') {
+        setCode(prev => prev.slice(0, -1));
+        setError('');
+      } else if (key === 'ok') {
+        handleSubmit();
+      } else if (code.length < 6) {
+        setCode(prev => prev + key);
+        setError('');
+      }
+    },
+    [code, loading, handleSubmit],
+  );
+
+  // Render the 6-digit display
+  const renderCodeDisplay = () => {
+    const digits = code.split('');
+    return (
+      <Animated.View
+        style={[styles.codeDisplay, {transform: [{translateX: shakeAnim}]}]}>
+        {[0, 1, 2, 3, 4, 5].map(i => (
+          <View
+            key={i}
+            style={[
+              styles.digitBox,
+              i < code.length && styles.digitBoxFilled,
+              i === code.length && styles.digitBoxActive,
+              error ? styles.digitBoxError : null,
+            ]}>
+            <Text style={styles.digitText}>
+              {digits[i] || ''}
+            </Text>
+          </View>
+        ))}
+      </Animated.View>
+    );
+  };
 
   return (
     <View style={styles.container}>
       <View style={styles.card}>
+        {/* Header */}
         <Image
           source={require('@/assets/hornero-icon.png')}
           style={styles.icon}
@@ -72,23 +113,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({onLoginSuccess}) => {
         <Text style={styles.title}>Hornero TV</Text>
         <Text style={styles.subtitle}>Ingresá tu código de acceso</Text>
 
-        <Animated.View style={{transform: [{translateX: shakeAnim}]}}>
-          <TextInput
-            ref={inputRef}
-            style={[styles.codeInput, error ? styles.codeInputError : null]}
-            value={code}
-            onChangeText={handleCodeChange}
-            placeholder="000000"
-            placeholderTextColor="#555"
-            keyboardType="number-pad"
-            maxLength={6}
-            autoFocus
-            editable={!loading}
-            textAlign="center"
-            onSubmitEditing={handleSubmit}
-          />
-        </Animated.View>
+        {/* Code display */}
+        {renderCodeDisplay()}
 
+        {/* Status message */}
         {error ? (
           <Text style={styles.errorText}>{error}</Text>
         ) : success ? (
@@ -99,16 +127,55 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({onLoginSuccess}) => {
           </Text>
         )}
 
-        <TouchableOpacity
-          style={[styles.button, (loading || code.length !== 6) && styles.buttonDisabled]}
-          onPress={handleSubmit}
-          disabled={loading || code.length !== 6}>
-          {loading ? (
-            <ActivityIndicator color={Colors.white} />
-          ) : (
-            <Text style={styles.buttonText}>Ingresar</Text>
-          )}
-        </TouchableOpacity>
+        {/* On-screen numpad */}
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={Colors.accent} />
+            <Text style={styles.loadingText}>Verificando...</Text>
+          </View>
+        ) : (
+          <View style={styles.numpad}>
+            {NUM_KEYS.map((row, rowIndex) => (
+              <View key={rowIndex} style={styles.numpadRow}>
+                {row.map(key => {
+                  const isDelete = key === 'del';
+                  const isOk = key === 'ok';
+                  const isDisabled = isOk && code.length !== 6;
+                  const isFocused = focusedKey === key;
+
+                  return (
+                    <TouchableOpacity
+                      key={key}
+                      style={[
+                        styles.numpadKey,
+                        isDelete && styles.numpadKeySpecial,
+                        isOk && styles.numpadKeyOk,
+                        isDisabled && styles.numpadKeyDisabled,
+                        isFocused && styles.numpadKeyFocused,
+                      ]}
+                      onPress={() => handleKeyPress(key)}
+                      onFocus={() => setFocusedKey(key)}
+                      onBlur={() => setFocusedKey(null)}
+                      disabled={isDisabled}
+                      activeOpacity={0.7}
+                      // First key of numpad gets initial focus for TV navigation
+                      hasTVPreferredFocus={rowIndex === 0 && key === '1'}>
+                      <Text
+                        style={[
+                          styles.numpadKeyText,
+                          isDelete && styles.numpadKeyTextSpecial,
+                          isOk && styles.numpadKeyTextOk,
+                          isDisabled && styles.numpadKeyTextDisabled,
+                        ]}>
+                        {isDelete ? 'Borrar' : isOk ? 'Ingresar' : key}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))}
+          </View>
+        )}
       </View>
     </View>
   );
@@ -124,16 +191,17 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: Colors.backgroundCard,
     borderRadius: BorderRadius.xl,
-    padding: Spacing.xl * 2,
+    paddingVertical: Spacing.xl,
+    paddingHorizontal: Spacing.xl * 1.5,
     alignItems: 'center',
-    minWidth: 380,
+    minWidth: 420,
     elevation: 8,
   },
   icon: {
-    width: 80,
-    height: 80,
-    borderRadius: 20,
-    marginBottom: Spacing.lg,
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    marginBottom: Spacing.md,
   },
   title: {
     fontSize: FontSizes.xxl,
@@ -144,58 +212,117 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: FontSizes.md,
     color: Colors.textSecondary,
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.lg,
   },
-  codeInput: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: Colors.white,
-    letterSpacing: 12,
-    backgroundColor: Colors.background,
+  // Code display
+  codeDisplay: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  digitBox: {
+    width: 48,
+    height: 56,
     borderRadius: BorderRadius.md,
     borderWidth: 2,
     borderColor: Colors.backgroundLight,
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.md,
-    minWidth: 260,
-    textAlign: 'center',
+    backgroundColor: Colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  codeInputError: {
+  digitBoxFilled: {
+    borderColor: Colors.accent,
+    backgroundColor: Colors.backgroundElevated,
+  },
+  digitBoxActive: {
+    borderColor: Colors.primaryLight,
+  },
+  digitBoxError: {
     borderColor: '#e74c3c',
   },
+  digitText: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: Colors.white,
+  },
+  // Messages
   errorText: {
     color: '#e74c3c',
     fontSize: FontSizes.sm,
-    marginTop: Spacing.md,
+    marginBottom: Spacing.md,
     textAlign: 'center',
+    minHeight: 20,
   },
   successText: {
     color: '#27ae60',
     fontSize: FontSizes.sm,
-    marginTop: Spacing.md,
+    marginBottom: Spacing.md,
     textAlign: 'center',
+    minHeight: 20,
   },
   hintText: {
-    color: Colors.textSecondary,
+    color: Colors.textMuted,
     fontSize: FontSizes.sm,
-    marginTop: Spacing.md,
+    marginBottom: Spacing.md,
     textAlign: 'center',
+    minHeight: 20,
   },
-  button: {
-    marginTop: Spacing.xl,
-    backgroundColor: Colors.primary,
-    paddingHorizontal: Spacing.xl * 2,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
-    minWidth: 200,
+  // Loading
+  loadingContainer: {
+    paddingVertical: Spacing.xl * 2,
     alignItems: 'center',
   },
-  buttonDisabled: {
-    opacity: 0.5,
+  loadingText: {
+    color: Colors.textSecondary,
+    fontSize: FontSizes.md,
+    marginTop: Spacing.md,
   },
-  buttonText: {
-    color: Colors.white,
-    fontSize: FontSizes.lg,
+  // Numpad
+  numpad: {
+    gap: Spacing.sm,
+  },
+  numpadRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  numpadKey: {
+    width: 100,
+    height: 52,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.backgroundElevated,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  numpadKeySpecial: {
+    backgroundColor: Colors.backgroundLight,
+  },
+  numpadKeyOk: {
+    backgroundColor: Colors.primary,
+  },
+  numpadKeyDisabled: {
+    opacity: 0.3,
+  },
+  numpadKeyFocused: {
+    borderColor: Colors.focusedBorder,
+    backgroundColor: Colors.focused,
+  },
+  numpadKeyText: {
+    fontSize: FontSizes.xl,
     fontWeight: '600',
+    color: Colors.white,
+  },
+  numpadKeyTextSpecial: {
+    fontSize: FontSizes.md,
+    color: Colors.textSecondary,
+  },
+  numpadKeyTextOk: {
+    fontSize: FontSizes.md,
+    fontWeight: 'bold',
+    color: Colors.white,
+  },
+  numpadKeyTextDisabled: {
+    color: Colors.textMuted,
   },
 });
