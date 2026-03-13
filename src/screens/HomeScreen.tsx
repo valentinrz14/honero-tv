@@ -2,6 +2,7 @@ import React, {useEffect, useState, useCallback} from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   FlatList,
   StatusBar,
@@ -56,7 +57,7 @@ export const HomeScreen: React.FC = () => {
     <View>
       {/* App header */}
       <View style={styles.appHeader}>
-        <Text style={styles.appIcon}>🐦</Text>
+        <Image source={require('@/assets/hornero-icon.png')} style={styles.appIcon} />
         <View>
           <Text style={styles.appTitle}>Hornero TV</Text>
           <Text style={styles.appSubtitle}>Televisión Argentina en vivo</Text>
@@ -159,7 +160,9 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.md,
   },
   appIcon: {
-    fontSize: 40,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     marginRight: Spacing.md,
   },
   appTitle: {

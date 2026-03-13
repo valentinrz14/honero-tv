@@ -1,5 +1,5 @@
 import React, {useState, useRef, useCallback} from 'react';
-import {View, Text, StyleSheet, ActivityIndicator} from 'react-native';
+import {View, Text, Image, StyleSheet, ActivityIndicator} from 'react-native';
 import {WebView} from 'react-native-webview';
 import {Channel, getChannelUrl} from '@/data/channels';
 import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
@@ -136,7 +136,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {/* Loading overlay */}
       {loading && (
         <View style={styles.loadingOverlay}>
-          <Text style={styles.loadingIcon}>🐦</Text>
+          <Image source={require('@/assets/hornero-icon.png')} style={styles.loadingIcon} />
           <ActivityIndicator size="large" color={Colors.accent} />
           <Text style={styles.loadingText}>Cargando {channel.name}...</Text>
         </View>
@@ -179,7 +179,9 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   loadingIcon: {
-    fontSize: 48,
+    width: 64,
+    height: 64,
+    borderRadius: 16,
     marginBottom: Spacing.md,
   },
   loadingText: {

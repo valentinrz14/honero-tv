@@ -2,6 +2,7 @@ import React, {useState, useCallback, useRef} from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   TouchableOpacity,
   SectionList,
@@ -66,7 +67,7 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
     <Animated.View
       style={[styles.container, {transform: [{translateX: slideAnim}]}]}>
       <View style={styles.header}>
-        <Text style={styles.headerIcon}>🐦</Text>
+        <Image source={require('@/assets/hornero-icon.png')} style={styles.headerIcon} />
         <Text style={styles.headerTitle}>Canales</Text>
       </View>
       <SectionList
@@ -135,7 +136,9 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.backgroundCard,
   },
   headerIcon: {
-    fontSize: FontSizes.xl,
+    width: 28,
+    height: 28,
+    borderRadius: 6,
     marginRight: Spacing.sm,
   },
   headerTitle: {

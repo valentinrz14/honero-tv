@@ -1,5 +1,5 @@
 import React, {useEffect, useRef} from 'react';
-import {View, Text, StyleSheet, Animated} from 'react-native';
+import {View, Text, Image, StyleSheet, Animated} from 'react-native';
 import {Colors, FontSizes} from '@/theme/colors';
 
 interface SplashScreenProps {
@@ -38,7 +38,7 @@ export const SplashScreenComponent: React.FC<SplashScreenProps> = ({
           styles.content,
           {opacity: fadeAnim, transform: [{scale: scaleAnim}]},
         ]}>
-        <Text style={styles.icon}>🐦</Text>
+        <Image source={require('@/assets/hornero-icon.png')} style={styles.icon} />
         <Text style={styles.title}>Hornero TV</Text>
         <Text style={styles.subtitle}>Televisión Argentina en vivo</Text>
         <View style={styles.nestDecoration}>
@@ -62,7 +62,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   icon: {
-    fontSize: 80,
+    width: 120,
+    height: 120,
+    borderRadius: 24,
     marginBottom: 16,
   },
   title: {
