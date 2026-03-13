@@ -1,14 +1,9 @@
 <resources>
-    <!-- Hornero TV Theme - Dark warm brown theme -->
+
+    <!-- Hornero TV Dark Theme for Android TV -->
     <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowBackground">#1A1210</item>
-        <item name="android:statusBarColor">#1A1210</item>
-        <item name="android:navigationBarColor">#1A1210</item>
-        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
     </style>
 
-    <!-- Splash Screen Theme -->
-    <style name="SplashTheme" parent="AppTheme">
-        <item name="android:windowBackground">@drawable/splash_screen</item>
-    </style>
 </resources>
