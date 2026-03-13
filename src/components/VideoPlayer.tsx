@@ -1,6 +1,13 @@
 import React, {useState, useRef, useCallback} from 'react';
-import {View, Text, Image, StyleSheet, ActivityIndicator} from 'react-native';
-import {WebView} from 'react-native-webview';
+import {
+  View,
+  Text,
+  Image,
+  StyleSheet,
+  ActivityIndicator,
+  TouchableOpacity,
+} from 'react-native';
+import {WebView, WebViewNavigation} from 'react-native-webview';
 import {Channel, getChannelUrl} from '@/data/channels';
 import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
 
@@ -9,37 +16,63 @@ interface VideoPlayerProps {
   onError?: (error: any) => void;
 }
 
-// CSS injected into the WebView to make the player fullscreen and hide
-// tvlibree.com's navigation, ads, sidebar, etc.
+// Block ad/popup domains
+const BLOCKED_DOMAINS = [
+  'acscdn.com',
+  'sharethis.com',
+  'adsbygoogle',
+  'doubleclick.net',
+  'googlesyndication',
+  'popads.net',
+  'popunder',
+  'adnxs.com',
+  'adsrvr.org',
+];
+
+// CSS to hide site chrome and make iframe player fullscreen
 const INJECTED_CSS = `
-  /* Hide everything except the video player */
-  header, nav, footer, .sidebar, .ads, .ad,
+  /* Hide site chrome */
+  header, footer, nav, aside,
+  .channel-aside, .player-actions, .canal-wrap > h1,
+  .wrap.privce, .note, .about, .watching-card,
+  .helper-links, .ops, .actions-row, .server-links,
   [class*="banner"], [class*="cookie"], [class*="popup"],
-  [class*="social"], [class*="share"], [class*="comment"],
-  [class*="related"], [class*="menu"], [class*="nav"],
+  [class*="social"], [class*="share"],
   [id*="header"], [id*="footer"], [id*="sidebar"],
-  [id*="cookie"], [id*="banner"], [id*="popup"],
-  .top-bar, .bottom-bar, .site-header, .site-footer,
-  .breadcrumb, .page-title, .channel-info-box,
-  .entry-content > *:not(.video-container):not(.player-container):not(iframe):not(video):not([class*="player"]):not([class*="video"]),
-  script[src*="ads"], ins.adsbygoogle {
+  .breadcrumb, .page-title, .channel-info-box {
     display: none !important;
     visibility: hidden !important;
     height: 0 !important;
     overflow: hidden !important;
+    pointer-events: none !important;
   }
 
-  /* Make body dark and clean */
+  /* Dark background */
   html, body {
-    background: #1A1210 !important;
+    background: #000 !important;
     margin: 0 !important;
     padding: 0 !important;
     overflow: hidden !important;
+    width: 100vw !important;
+    height: 100vh !important;
   }
 
-  /* Make the video/iframe player fullscreen */
-  iframe, video, .video-container, .player-container,
-  [class*="player"], [class*="video-wrapper"] {
+  /* Remove all padding/margins from containers */
+  .wrap, .canal-wrap, main, .channel-layout,
+  .player-card, .iframe-wrap, article {
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: 100vw !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    display: block !important;
+  }
+
+  /* Make the player iframe fullscreen */
+  iframe#iframe, iframe[name="iframe"] {
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
@@ -47,35 +80,90 @@ const INJECTED_CSS = `
     height: 100vh !important;
     max-width: 100vw !important;
     max-height: 100vh !important;
-    z-index: 9999 !important;
+    z-index: 99999 !important;
     border: none !important;
+    aspect-ratio: auto !important;
+    margin: 0 !important;
+  }
+
+  /* For pages without named iframe, target main video/iframe */
+  .iframe-wrap iframe:only-child,
+  article iframe:first-of-type {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 99999 !important;
+    border: none !important;
+    aspect-ratio: auto !important;
+    margin: 0 !important;
+  }
+
+  /* Fullscreen video elements too */
+  video {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 99999 !important;
+    object-fit: contain !important;
   }
 `;
 
 const INJECTED_JS = `
   (function() {
+    'use strict';
+
+    // Block popup/ad scripts before they execute
+    window.open = function() { return null; };
+    window.aclib = { runPop: function() {} };
+
     // Inject CSS
     var style = document.createElement('style');
     style.textContent = ${JSON.stringify(INJECTED_CSS)};
     document.head.appendChild(style);
 
-    // Auto-click play buttons if present
-    setTimeout(function() {
-      var playBtns = document.querySelectorAll('[class*="play"], button[aria-label*="play"], .vjs-big-play-button');
-      playBtns.forEach(function(btn) { btn.click(); });
-    }, 2000);
+    // Remove ad scripts
+    var scripts = document.querySelectorAll('script[src*="acscdn"], script[src*="sharethis"], script[src*="aclib"]');
+    scripts.forEach(function(s) { s.remove(); });
 
-    // Re-apply styles after dynamic content loads
+    // Re-apply CSS on DOM changes (dynamic content)
+    var applied = false;
     var observer = new MutationObserver(function() {
-      var style2 = document.createElement('style');
-      style2.textContent = ${JSON.stringify(INJECTED_CSS)};
-      document.head.appendChild(style2);
+      if (!applied) {
+        applied = true;
+        setTimeout(function() {
+          var s = document.createElement('style');
+          s.textContent = ${JSON.stringify(INJECTED_CSS)};
+          document.head.appendChild(s);
+          applied = false;
+        }, 100);
+      }
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
 
-    // Notify RN when done loading
+    // Auto-click play buttons after a delay
+    setTimeout(function() {
+      var playBtns = document.querySelectorAll(
+        '[class*="play"], button[aria-label*="play"], .vjs-big-play-button, .ytp-large-play-button'
+      );
+      playBtns.forEach(function(btn) { try { btn.click(); } catch(e) {} });
+    }, 3000);
+
+    // Notify RN that page loaded OK
     window.ReactNativeWebView.postMessage(JSON.stringify({type: 'loaded'}));
   })();
+  true;
+`;
+
+// JS injected BEFORE the page loads (blocks ads early)
+const INJECTED_JS_BEFORE = `
+  window.open = function() { return null; };
+  window.aclib = { runPop: function() {} };
   true;
 `;
 
@@ -86,18 +174,46 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const webViewRef = useRef<WebView>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [httpError, setHttpError] = useState(false);
+  const mainUrlLoaded = useRef(false);
 
   const channelUrl = getChannelUrl(channel);
 
   const handleLoadEnd = useCallback(() => {
-    setLoading(false);
+    // Only clear loading once the main page has had time to render
+    mainUrlLoaded.current = true;
+    setTimeout(() => setLoading(false), 1500);
   }, []);
+
+  const handleHttpError = useCallback(
+    (syntheticEvent: any) => {
+      const {nativeEvent} = syntheticEvent;
+      // Only show error for the main URL, not for sub-resources or ad URLs
+      const statusCode = nativeEvent?.statusCode;
+      const url = nativeEvent?.url || '';
+
+      // Ignore errors from ad domains and sub-resources
+      const isAdUrl = BLOCKED_DOMAINS.some(d => url.includes(d));
+      if (isAdUrl) return;
+
+      // Only treat 4xx/5xx on main page as real errors
+      if (statusCode >= 400 && url.includes('tvlibr3.com')) {
+        setHttpError(true);
+        setLoading(false);
+        onError?.(nativeEvent);
+      }
+    },
+    [onError],
+  );
 
   const handleError = useCallback(
     (syntheticEvent: any) => {
-      setError(true);
-      setLoading(false);
-      onError?.(syntheticEvent.nativeEvent);
+      // Only show error if main page completely failed to load
+      if (!mainUrlLoaded.current) {
+        setError(true);
+        setLoading(false);
+        onError?.(syntheticEvent.nativeEvent);
+      }
     },
     [onError],
   );
@@ -113,6 +229,30 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, []);
 
+  // Block navigation to ad/popup URLs
+  const handleShouldStartLoad = useCallback(
+    (event: WebViewNavigation) => {
+      const {url} = event;
+      // Block known ad domains
+      const isBlocked = BLOCKED_DOMAINS.some(d => url.includes(d));
+      if (isBlocked) return false;
+      // Block about:blank popups
+      if (url === 'about:blank') return false;
+      return true;
+    },
+    [],
+  );
+
+  const handleRetry = useCallback(() => {
+    setError(false);
+    setHttpError(false);
+    setLoading(true);
+    mainUrlLoaded.current = false;
+    webViewRef.current?.reload();
+  }, []);
+
+  const showError = error || httpError;
+
   return (
     <View style={styles.container}>
       <WebView
@@ -121,38 +261,54 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         style={styles.webview}
         javaScriptEnabled
         domStorageEnabled
+        javaScriptCanOpenWindowsAutomatically={false}
         mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback
         injectedJavaScript={INJECTED_JS}
+        injectedJavaScriptBeforeContentLoaded={INJECTED_JS_BEFORE}
         onLoadEnd={handleLoadEnd}
         onError={handleError}
+        onHttpError={handleHttpError}
         onMessage={handleMessage}
+        onShouldStartLoadWithRequest={handleShouldStartLoad}
         setSupportMultipleWindows={false}
         mixedContentMode="always"
         allowsFullscreenVideo
-        userAgent="Mozilla/5.0 (Linux; Android 10; Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+        allowFileAccess
+        thirdPartyCookiesEnabled
+        cacheEnabled
+        originWhitelist={['*']}
+        userAgent="Mozilla/5.0 (Linux; Android 10; BRAVIA 4K GB) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
       />
 
       {/* Loading overlay */}
       {loading && (
         <View style={styles.loadingOverlay}>
-          <Image source={require('@/assets/hornero-icon.png')} style={styles.loadingIcon} />
+          <Image
+            source={require('@/assets/hornero-icon.png')}
+            style={styles.loadingIcon}
+          />
           <ActivityIndicator size="large" color={Colors.accent} />
           <Text style={styles.loadingText}>Cargando {channel.name}...</Text>
         </View>
       )}
 
       {/* Error state */}
-      {error && (
+      {showError && (
         <View style={styles.errorOverlay}>
           <Text style={styles.errorIcon}>⚠️</Text>
           <Text style={styles.errorText}>No se pudo cargar el canal</Text>
-          <Text style={styles.errorSubtext}>Intentá de nuevo más tarde</Text>
+          <Text style={styles.errorSubtext}>
+            Verificá tu conexión a internet
+          </Text>
+          <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
+            <Text style={styles.retryText}>Reintentar</Text>
+          </TouchableOpacity>
         </View>
       )}
 
       {/* Channel name badge - top left */}
-      {!loading && !error && (
+      {!loading && !showError && (
         <View style={styles.channelBadge}>
           <View style={styles.liveDot} />
           <Text style={styles.channelBadgeText}>{channel.name}</Text>
@@ -209,6 +365,18 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.md,
     color: Colors.textSecondary,
     marginTop: Spacing.sm,
+  },
+  retryButton: {
+    marginTop: Spacing.lg,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.md,
+  },
+  retryText: {
+    fontSize: FontSizes.md,
+    color: Colors.white,
+    fontWeight: '600',
   },
   channelBadge: {
     position: 'absolute',
