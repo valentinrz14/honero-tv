@@ -1,3 +1,7 @@
+if (__DEV__) {
+  require('@/config/reactotron');
+}
+
 import React, {useState} from 'react';
 import {AppNavigator} from '@/navigation/AppNavigator';
 import {SplashScreenComponent} from '@/components/SplashScreen';
