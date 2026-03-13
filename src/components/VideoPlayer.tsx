@@ -1,7 +1,7 @@
 import React, {useState, useRef, useCallback} from 'react';
-import {View, Text, StyleSheet, TouchableOpacity, Animated} from 'react-native';
-import Video, {OnLoadData, OnProgressData} from 'react-native-video';
-import {Channel} from '@/data/channels';
+import {View, Text, StyleSheet, ActivityIndicator} from 'react-native';
+import {WebView} from 'react-native-webview';
+import {Channel, getChannelUrl} from '@/data/channels';
 import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
 
 interface VideoPlayerProps {
@@ -9,143 +9,155 @@ interface VideoPlayerProps {
   onError?: (error: any) => void;
 }
 
+// CSS injected into the WebView to make the player fullscreen and hide
+// tvlibree.com's navigation, ads, sidebar, etc.
+const INJECTED_CSS = `
+  /* Hide everything except the video player */
+  header, nav, footer, .sidebar, .ads, .ad,
+  [class*="banner"], [class*="cookie"], [class*="popup"],
+  [class*="social"], [class*="share"], [class*="comment"],
+  [class*="related"], [class*="menu"], [class*="nav"],
+  [id*="header"], [id*="footer"], [id*="sidebar"],
+  [id*="cookie"], [id*="banner"], [id*="popup"],
+  .top-bar, .bottom-bar, .site-header, .site-footer,
+  .breadcrumb, .page-title, .channel-info-box,
+  .entry-content > *:not(.video-container):not(.player-container):not(iframe):not(video):not([class*="player"]):not([class*="video"]),
+  script[src*="ads"], ins.adsbygoogle {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* Make body dark and clean */
+  html, body {
+    background: #1A1210 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* Make the video/iframe player fullscreen */
+  iframe, video, .video-container, .player-container,
+  [class*="player"], [class*="video-wrapper"] {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    z-index: 9999 !important;
+    border: none !important;
+  }
+`;
+
+const INJECTED_JS = `
+  (function() {
+    // Inject CSS
+    var style = document.createElement('style');
+    style.textContent = ${JSON.stringify(INJECTED_CSS)};
+    document.head.appendChild(style);
+
+    // Auto-click play buttons if present
+    setTimeout(function() {
+      var playBtns = document.querySelectorAll('[class*="play"], button[aria-label*="play"], .vjs-big-play-button');
+      playBtns.forEach(function(btn) { btn.click(); });
+    }, 2000);
+
+    // Re-apply styles after dynamic content loads
+    var observer = new MutationObserver(function() {
+      var style2 = document.createElement('style');
+      style2.textContent = ${JSON.stringify(INJECTED_CSS)};
+      document.head.appendChild(style2);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // Notify RN when done loading
+    window.ReactNativeWebView.postMessage(JSON.stringify({type: 'loaded'}));
+  })();
+  true;
+`;
+
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   channel,
   onError,
 }) => {
-  const videoRef = useRef<any>(null);
-  const [paused, setPaused] = useState(false);
+  const webViewRef = useRef<WebView>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [controlsVisible, setControlsVisible] = useState(true);
-  const controlsTimeout = useRef<ReturnType<typeof setTimeout>>();
-  const controlsOpacity = useRef(new Animated.Value(1)).current;
 
-  const showControls = useCallback(() => {
-    if (controlsTimeout.current) {
-      clearTimeout(controlsTimeout.current);
-    }
-    setControlsVisible(true);
-    Animated.timing(controlsOpacity, {
-      toValue: 1,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
+  const channelUrl = getChannelUrl(channel);
 
-    controlsTimeout.current = setTimeout(() => {
-      Animated.timing(controlsOpacity, {
-        toValue: 0,
-        duration: 500,
-        useNativeDriver: true,
-      }).start(() => setControlsVisible(false));
-    }, 5000);
-  }, [controlsOpacity]);
-
-  const togglePlayPause = useCallback(() => {
-    setPaused(prev => !prev);
-    showControls();
-  }, [showControls]);
-
-  const handleLoad = useCallback((_data: OnLoadData) => {
+  const handleLoadEnd = useCallback(() => {
     setLoading(false);
-    setError(false);
   }, []);
 
   const handleError = useCallback(
-    (err: any) => {
+    (syntheticEvent: any) => {
       setError(true);
       setLoading(false);
-      onError?.(err);
+      onError?.(syntheticEvent.nativeEvent);
     },
     [onError],
   );
 
-  const handleBuffer = useCallback(({isBuffering}: {isBuffering: boolean}) => {
-    setLoading(isBuffering);
+  const handleMessage = useCallback((event: any) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
+      if (data.type === 'loaded') {
+        setLoading(false);
+      }
+    } catch {
+      // ignore
+    }
   }, []);
 
   return (
     <View style={styles.container}>
-      <Video
-        ref={videoRef}
-        source={{uri: channel.streamUrl}}
-        style={styles.video}
-        resizeMode="contain"
-        paused={paused}
-        onLoad={handleLoad}
+      <WebView
+        ref={webViewRef}
+        source={{uri: channelUrl}}
+        style={styles.webview}
+        javaScriptEnabled
+        domStorageEnabled
+        mediaPlaybackRequiresUserAction={false}
+        allowsInlineMediaPlayback
+        injectedJavaScript={INJECTED_JS}
+        onLoadEnd={handleLoadEnd}
         onError={handleError}
-        onBuffer={handleBuffer}
-        repeat={false}
-        controls={false}
-        bufferConfig={{
-          minBufferMs: 5000,
-          maxBufferMs: 30000,
-          bufferForPlaybackMs: 2500,
-          bufferForPlaybackAfterRebufferMs: 5000,
-        }}
+        onMessage={handleMessage}
+        setSupportMultipleWindows={false}
+        mixedContentMode="always"
+        allowsFullscreenVideo
+        userAgent="Mozilla/5.0 (Linux; Android 10; Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
       />
 
-      {/* Touch overlay for play/pause */}
-      <TouchableOpacity
-        style={styles.touchOverlay}
-        onPress={togglePlayPause}
-        onFocus={showControls}
-        activeOpacity={1}>
-        {/* Loading indicator */}
-        {loading && (
-          <View style={styles.loadingContainer}>
-            <Text style={styles.loadingText}>Cargando...</Text>
-            <Text style={styles.loadingIcon}>🐦</Text>
-          </View>
-        )}
+      {/* Loading overlay */}
+      {loading && (
+        <View style={styles.loadingOverlay}>
+          <Text style={styles.loadingIcon}>🐦</Text>
+          <ActivityIndicator size="large" color={Colors.accent} />
+          <Text style={styles.loadingText}>Cargando {channel.name}...</Text>
+        </View>
+      )}
 
-        {/* Error state */}
-        {error && (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorIcon}>⚠️</Text>
-            <Text style={styles.errorText}>
-              No se pudo cargar el canal
-            </Text>
-            <Text style={styles.errorSubtext}>
-              Intentá de nuevo más tarde
-            </Text>
-          </View>
-        )}
+      {/* Error state */}
+      {error && (
+        <View style={styles.errorOverlay}>
+          <Text style={styles.errorIcon}>⚠️</Text>
+          <Text style={styles.errorText}>No se pudo cargar el canal</Text>
+          <Text style={styles.errorSubtext}>Intentá de nuevo más tarde</Text>
+        </View>
+      )}
 
-        {/* Controls overlay */}
-        {controlsVisible && !error && (
-          <Animated.View
-            style={[styles.controlsOverlay, {opacity: controlsOpacity}]}>
-            {/* Channel info */}
-            <View style={styles.channelInfo}>
-              <View style={styles.channelLogo}>
-                <Text style={styles.channelLogoText}>
-                  {channel.name.substring(0, 2).toUpperCase()}
-                </Text>
-              </View>
-              <View>
-                <Text style={styles.channelName}>{channel.name}</Text>
-                {channel.description && (
-                  <Text style={styles.channelDesc}>{channel.description}</Text>
-                )}
-              </View>
-            </View>
-
-            {/* Play/Pause button */}
-            <View style={styles.controlsCenter}>
-              <View style={styles.playButton}>
-                <Text style={styles.playIcon}>{paused ? '▶' : '⏸'}</Text>
-              </View>
-            </View>
-
-            {/* Live indicator */}
-            <View style={styles.liveIndicator}>
-              <View style={styles.liveDot} />
-              <Text style={styles.liveText}>EN VIVO</Text>
-            </View>
-          </Animated.View>
-        )}
-      </TouchableOpacity>
+      {/* Channel name badge - top left */}
+      {!loading && !error && (
+        <View style={styles.channelBadge}>
+          <View style={styles.liveDot} />
+          <Text style={styles.channelBadgeText}>{channel.name}</Text>
+        </View>
+      )}
     </View>
   );
 };
@@ -155,30 +167,32 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.black,
   },
-  video: {
+  webview: {
     flex: 1,
+    backgroundColor: Colors.black,
   },
-  touchOverlay: {
+  loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
+    backgroundColor: Colors.background,
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 10,
   },
-  loadingContainer: {
-    alignItems: 'center',
+  loadingIcon: {
+    fontSize: 48,
+    marginBottom: Spacing.md,
   },
   loadingText: {
     fontSize: FontSizes.lg,
     color: Colors.textPrimary,
-    marginBottom: Spacing.sm,
+    marginTop: Spacing.md,
   },
-  loadingIcon: {
-    fontSize: 48,
-  },
-  errorContainer: {
+  errorOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: Colors.background,
+    justifyContent: 'center',
     alignItems: 'center',
-    padding: Spacing.xl,
-    backgroundColor: Colors.overlay,
-    borderRadius: BorderRadius.lg,
+    zIndex: 10,
   },
   errorIcon: {
     fontSize: 48,
@@ -194,69 +208,28 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginTop: Spacing.sm,
   },
-  controlsOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    justifyContent: 'space-between',
-    padding: Spacing.xl,
-  },
-  channelInfo: {
+  channelBadge: {
+    position: 'absolute',
+    top: Spacing.md,
+    left: Spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  channelLogo: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: Spacing.md,
-  },
-  channelLogoText: {
-    fontSize: FontSizes.lg,
-    fontWeight: 'bold',
-    color: Colors.white,
-  },
-  channelName: {
-    fontSize: FontSizes.xl,
-    fontWeight: 'bold',
-    color: Colors.white,
-  },
-  channelDesc: {
-    fontSize: FontSizes.md,
-    color: 'rgba(255,255,255,0.7)',
-  },
-  controlsCenter: {
-    alignItems: 'center',
-  },
-  playButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(139, 94, 60, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  playIcon: {
-    fontSize: 32,
-    color: Colors.white,
-  },
-  liveIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-end',
+    backgroundColor: 'rgba(26, 18, 16, 0.7)',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    zIndex: 5,
   },
   liveDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: '#E74C3C',
     marginRight: Spacing.sm,
   },
-  liveText: {
-    fontSize: FontSizes.md,
-    fontWeight: 'bold',
-    color: '#E74C3C',
+  channelBadgeText: {
+    fontSize: FontSizes.sm,
+    color: Colors.white,
+    fontWeight: '600',
   },
 });
