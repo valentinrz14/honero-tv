@@ -2,6 +2,7 @@ import React, {useState, useCallback} from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   TouchableOpacity,
   TVFocusGuideView,
@@ -52,9 +53,17 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
           {backgroundColor: category?.color || Colors.backgroundCard},
         ]}>
         <View style={styles.logoContainer}>
-          <Text style={styles.logoText}>
-            {channel.name.substring(0, 2).toUpperCase()}
-          </Text>
+          {channel.logoUrl ? (
+            <Image
+              source={{uri: channel.logoUrl}}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
+          ) : (
+            <Text style={styles.logoText}>
+              {channel.name.substring(0, 2).toUpperCase()}
+            </Text>
+          )}
         </View>
         <Text style={styles.channelName} numberOfLines={1}>
           {channel.name}
@@ -95,6 +104,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: Spacing.sm,
+  },
+  logoImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
   },
   logoText: {
     fontSize: FontSizes.xl,
