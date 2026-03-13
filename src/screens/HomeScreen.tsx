@@ -1,4 +1,4 @@
-import React, {useEffect, useState, useCallback} from 'react';
+import React, {useCallback, useMemo} from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,7 @@ import {
   channels,
   getChannelsByCategory,
 } from '@/data/channels';
-import {getRecentChannels, addRecentChannel} from '@/utils/storage';
+import {useRecentChannels, useAddRecentChannel} from '@/hooks/useRecentChannels';
 import {Colors, Spacing, FontSizes} from '@/theme/colors';
 import {RootStackParamList} from '@/navigation/AppNavigator';
 
@@ -26,32 +26,24 @@ type HomeNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
 export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<HomeNavigationProp>();
-  const [recentChannelIds, setRecentChannelIds] = useState<string[]>([]);
-
-  useEffect(() => {
-    loadRecent();
-  }, []);
-
-  const loadRecent = async () => {
-    const recent = await getRecentChannels();
-    setRecentChannelIds(recent);
-  };
+  const {data: recentChannelIds = []} = useRecentChannels();
+  const addRecent = useAddRecentChannel();
 
   const handleChannelPress = useCallback(
-    async (channel: Channel) => {
-      await addRecentChannel(channel.id);
-      setRecentChannelIds(prev => {
-        const filtered = prev.filter(id => id !== channel.id);
-        return [channel.id, ...filtered].slice(0, 10);
-      });
+    (channel: Channel) => {
+      addRecent.mutate(channel.id);
       navigation.navigate('Player', {channelId: channel.id});
     },
-    [navigation],
+    [navigation, addRecent],
   );
 
-  const recentChannels = recentChannelIds
-    .map(id => channels.find(ch => ch.id === id))
-    .filter(Boolean) as Channel[];
+  const recentChannels = useMemo(
+    () =>
+      recentChannelIds
+        .map(id => channels.find(ch => ch.id === id))
+        .filter(Boolean) as Channel[],
+    [recentChannelIds],
+  );
 
   const renderHeader = () => (
     <View>

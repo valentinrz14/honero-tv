@@ -1,11 +1,13 @@
-import React, {useState, useEffect, useCallback} from 'react';
+import React, {useCallback} from 'react';
 import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {HomeScreen} from '@/screens/HomeScreen';
 import {PlayerScreen} from '@/screens/PlayerScreen';
 import {LoginScreen} from '@/screens/LoginScreen';
 import {Colors} from '@/theme/colors';
-import {getStoredSession, validateSession} from '@/lib/auth';
+import {useStoredSession, useValidateSession} from '@/hooks/useAuth';
+import {useQueryClient} from '@tanstack/react-query';
+import {authKeys} from '@/hooks/useAuth';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -16,28 +18,23 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export const AppNavigator: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const queryClient = useQueryClient();
+  const {data: session, isLoading: sessionLoading} = useStoredSession();
+  const hasSession = !!session;
 
-  // Check stored session on mount
-  useEffect(() => {
-    (async () => {
-      const session = await getStoredSession();
-      if (session) {
-        // Validate with server in background
-        const result = await validateSession();
-        setIsAuthenticated(result.valid);
-      } else {
-        setIsAuthenticated(false);
-      }
-    })();
-  }, []);
+  const {data: validation, isLoading: validationLoading} =
+    useValidateSession(hasSession);
+
+  const isLoading = sessionLoading || (hasSession && validationLoading);
+  const isAuthenticated = hasSession && (validation?.valid ?? true);
 
   const handleLoginSuccess = useCallback(() => {
-    setIsAuthenticated(true);
-  }, []);
+    queryClient.invalidateQueries({queryKey: authKeys.session});
+    queryClient.invalidateQueries({queryKey: authKeys.validation});
+  }, [queryClient]);
 
   // Still checking auth state - show nothing (splash is still showing)
-  if (isAuthenticated === null) {
+  if (isLoading) {
     return null;
   }
 

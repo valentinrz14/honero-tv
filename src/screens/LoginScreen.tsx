@@ -9,7 +9,7 @@ import {
   Animated,
 } from 'react-native';
 import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
-import {loginWithCode} from '@/lib/auth';
+import {useLogin} from '@/hooks/useAuth';
 
 interface LoginScreenProps {
   onLoginSuccess: () => void;
@@ -24,11 +24,11 @@ const NUM_KEYS = [
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({onLoginSuccess}) => {
   const [code, setCode] = useState('');
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
+  const loginMutation = useLogin();
 
   const shake = useCallback(() => {
     Animated.sequence([
@@ -46,24 +46,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({onLoginSuccess}) => {
       return;
     }
 
-    setLoading(true);
     setError('');
 
-    const result = await loginWithCode(code);
-
-    if (result.success) {
-      setSuccess(result.message);
-      setTimeout(() => onLoginSuccess(), 1000);
-    } else {
-      setError(result.message);
-      shake();
-      setLoading(false);
-    }
-  }, [code, onLoginSuccess, shake]);
+    loginMutation.mutate(code, {
+      onSuccess: result => {
+        setSuccess(result.message);
+        setTimeout(() => onLoginSuccess(), 1000);
+      },
+      onError: (err: Error) => {
+        setError(err.message);
+        shake();
+      },
+    });
+  }, [code, onLoginSuccess, shake, loginMutation]);
 
   const handleKeyPress = useCallback(
     (key: string) => {
-      if (loading) return;
+      if (loginMutation.isPending) return;
 
       if (key === 'del') {
         setCode(prev => prev.slice(0, -1));
@@ -75,7 +74,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({onLoginSuccess}) => {
         setError('');
       }
     },
-    [code, loading, handleSubmit],
+    [code, loginMutation.isPending, handleSubmit],
   );
 
   // Render the 6-digit display
@@ -128,7 +127,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({onLoginSuccess}) => {
         )}
 
         {/* On-screen numpad */}
-        {loading ? (
+        {loginMutation.isPending ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={Colors.accent} />
             <Text style={styles.loadingText}>Verificando...</Text>
