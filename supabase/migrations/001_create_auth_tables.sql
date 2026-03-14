@@ -44,6 +44,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_users_updated_at ON users;
 CREATE TRIGGER trigger_users_updated_at
   BEFORE UPDATE ON users
   FOR EACH ROW
@@ -55,11 +56,13 @@ ALTER TABLE devices ENABLE ROW LEVEL SECURITY;
 
 -- Policies: allow all operations for authenticated service role (admin panel)
 -- The admin panel uses the service_role key
+DROP POLICY IF EXISTS "Service role full access on users" ON users;
 CREATE POLICY "Service role full access on users"
   ON users FOR ALL
   USING (true)
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Service role full access on devices" ON devices;
 CREATE POLICY "Service role full access on devices"
   ON devices FOR ALL
   USING (true)
