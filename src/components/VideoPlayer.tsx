@@ -21,20 +21,14 @@ interface VideoPlayerProps {
 const USER_AGENT =
   'Mozilla/5.0 (Linux; Android 14; Chromecast HD) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
-// Block ad/popup domains
+// Block ad/popup domains (NOT doubleclick/googlesyndication - YouTube needs them)
 const BLOCKED_DOMAINS = [
   'acscdn.com',
   'sharethis.com',
-  'adsbygoogle',
-  'doubleclick.net',
-  'googlesyndication',
   'popads.net',
   'popunder',
   'adnxs.com',
   'adsrvr.org',
-  'googletagmanager.com',
-  'google-analytics.com',
-  'facebook.net',
   'hotjar.com',
   'propellerads.com',
   'exoclick.com',
@@ -186,42 +180,41 @@ function buildInjectedJS(channel: Channel): string {
     return false;
   }
 
+  // Single style element - reuse it, never create duplicates
+  var _styleEl = null;
   function applyFullscreen() {
-    // Apply CSS immediately
-    var style = document.createElement('style');
-    style.textContent = ${JSON.stringify(FULLSCREEN_CSS)};
-    document.head.appendChild(style);
+    // Apply CSS once using a single style element
+    if (!_styleEl) {
+      _styleEl = document.createElement('style');
+      _styleEl.id = 'honero-fullscreen';
+      document.head.appendChild(_styleEl);
+    }
+    _styleEl.textContent = ${JSON.stringify(FULLSCREEN_CSS)};
     removeAds();
 
     // Wait for the iframe/player to be created, then make body visible and notify RN
     setTimeout(function() {
-      // Re-apply CSS to catch any dynamic elements
-      var s2 = document.createElement('style');
-      s2.textContent = ${JSON.stringify(FULLSCREEN_CSS)};
-      document.head.appendChild(s2);
-      // Now make body visible - only the player iframe should be showing
+      // Make body visible - only the player iframe should be showing
       document.body.style.visibility = 'visible';
       removeAds();
 
       window.ReactNativeWebView.postMessage(JSON.stringify({type: 'playing'}));
     }, 1500);
 
-    // Re-apply CSS on dynamic changes
-    var applied = false;
-    var observer = new MutationObserver(function() {
-      if (!applied) {
-        applied = true;
-        setTimeout(function() {
-          var s = document.createElement('style');
-          s.textContent = ${JSON.stringify(FULLSCREEN_CSS)};
-          document.head.appendChild(s);
-          removeAds();
-          applied = false;
-        }, 500);
+    // Watch for new ad elements only - limit to 10 firings then stop
+    var observerCount = 0;
+    var observer = new MutationObserver(function(mutations) {
+      observerCount++;
+      if (observerCount > 10) {
+        observer.disconnect();
+        return;
       }
+      // Only remove ads, don't re-inject CSS (it's already applied)
+      removeAds();
     });
     if (document.body) {
-      observer.observe(document.body, { childList: true, subtree: true });
+      // Only watch direct children, not subtree - avoids YouTube player mutations
+      observer.observe(document.body, { childList: true });
     }
   }
 
@@ -267,17 +260,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const webViewRef = useRef<WebView>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const readyRef = useRef(false);
 
   const handleLoadEnd = useCallback(() => {
     // Page loaded - the injected JS will call cambiarOpcion and send 'playing' message
-    // Set a fallback timeout to hide loading in case postMessage doesn't fire
-    setTimeout(() => setLoading(false), 8000);
+    // Set a fallback timeout in case postMessage doesn't fire
+    setTimeout(() => {
+      if (!readyRef.current) {
+        readyRef.current = true;
+        setLoading(false);
+      }
+    }, 8000);
   }, []);
 
   const handleMessage = useCallback((event: any) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
-      if (data.type === 'playing') {
+      if (data.type === 'playing' && !readyRef.current) {
+        readyRef.current = true;
         setLoading(false);
       } else if (data.type === 'error') {
         console.log('VideoPlayer error:', data.message);
@@ -300,6 +300,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const handleShouldStartLoad = useCallback((event: WebViewNavigation) => {
     const {url} = event;
+    // Always allow YouTube, Google Video, and the main site
+    if (
+      url.includes('youtube.com') ||
+      url.includes('youtu.be') ||
+      url.includes('googlevideo.com') ||
+      url.includes('google.com') ||
+      url.includes('gstatic.com') ||
+      url.includes('pelisjuanita.com')
+    ) {
+      return true;
+    }
     // Block ad domains
     const isBlocked = BLOCKED_DOMAINS.some(d => url.includes(d));
     if (isBlocked) return false;
