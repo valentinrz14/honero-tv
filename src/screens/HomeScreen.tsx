@@ -13,6 +13,7 @@ import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {SearchBar} from '@/components/SearchBar';
 import {CategoryRow} from '@/components/CategoryRow';
 import {ChannelCard} from '@/components/ChannelCard';
+import {ScraperWebView} from '@/components/ScraperWebView';
 import {Channel} from '@/data/channels';
 import {useChannels, useCategories, useChannelsLoading} from '@/hooks/useChannels';
 import {useRecentChannels, useAddRecentChannel} from '@/hooks/useRecentChannels';
@@ -118,6 +119,7 @@ export const HomeScreen: React.FC = () => {
     return (
       <View style={styles.container}>
         <StatusBar backgroundColor={Colors.background} barStyle="light-content" />
+        <ScraperWebView />
         <View style={styles.loadingContainer}>
           <Image source={require('@/assets/hornero-icon.png')} style={styles.loadingIcon} />
           <ActivityIndicator size="large" color={Colors.accent} />

@@ -13,14 +13,19 @@ export interface ChannelsData {
 }
 
 /**
- * Fetch channels by scraping pelisjuanita.com/tv/.
- * Falls back to hardcoded data if scraping fails.
+ * Fetch channels by triggering a WebView scrape of pelisjuanita.com/tv/.
+ * The ScraperWebView component must be mounted for this to work.
+ * Falls back to empty data if scraping fails (will retry via React Query).
  */
 export async function fetchChannelsData(): Promise<ChannelsData> {
   try {
+    console.log('fetchChannelsData: starting WebView scrape...');
     const data = await scrapeChannels();
 
     if (data.channels.length > 0 && data.categories.length > 0) {
+      console.log(
+        `fetchChannelsData: success - ${data.channels.length} channels`,
+      );
       return data;
     }
 
@@ -41,7 +46,6 @@ function getFallbackData(): ChannelsData {
 
 /**
  * Validate a stream URL by making a HEAD request.
- * Returns true if the URL responds successfully (2xx/3xx).
  */
 export async function validateStreamUrl(url: string): Promise<boolean> {
   try {
@@ -94,7 +98,6 @@ export async function findWorkingStream(
     return null;
   }
 
-  // Sort by priority (lower = better), prefer non-ad options
   const sorted = [...options].sort((a, b) => {
     if (a.hasAds !== b.hasAds) return a.hasAds ? 1 : -1;
     return a.priority - b.priority;
