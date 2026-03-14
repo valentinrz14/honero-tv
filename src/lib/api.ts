@@ -115,16 +115,36 @@ export async function validateSession(): Promise<SessionValidation> {
     return {valid: false, message: 'No hay sesión activa'};
   }
 
-  const deviceId = await getDeviceId();
+  try {
+    const deviceId = await getDeviceId();
 
-  const {data, error} = await supabase.rpc('validate_device', {
-    p_access_code: session.accessCode,
-    p_device_id: deviceId,
-    p_device_name: null,
-  });
+    const {data, error} = await supabase.rpc('validate_device', {
+      p_access_code: session.accessCode,
+      p_device_id: deviceId,
+      p_device_name: null,
+    });
 
-  if (error) {
-    // Can't reach server - trust local session
+    if (error) {
+      // Can't reach server - trust local session
+      return {
+        valid: true,
+        daysRemaining: Math.ceil(
+          (new Date(session.expiresAt).getTime() - Date.now()) /
+            (1000 * 60 * 60 * 24),
+        ),
+      };
+    }
+
+    if (data.status === 'ok') {
+      session.expiresAt = data.expires_at;
+      await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+      return {valid: true, daysRemaining: Math.round(data.days_remaining)};
+    }
+
+    await clearSession();
+    return {valid: false, message: data.message};
+  } catch {
+    // Network error - trust local session
     return {
       valid: true,
       daysRemaining: Math.ceil(
@@ -133,13 +153,4 @@ export async function validateSession(): Promise<SessionValidation> {
       ),
     };
   }
-
-  if (data.status === 'ok') {
-    session.expiresAt = data.expires_at;
-    await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
-    return {valid: true, daysRemaining: Math.round(data.days_remaining)};
-  }
-
-  await clearSession();
-  return {valid: false, message: data.message};
 }

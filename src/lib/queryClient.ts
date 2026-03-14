@@ -9,5 +9,8 @@ export const queryClient = new QueryClient({
       refetchOnWindowFocus: false,
       staleTime: oneDay,
     },
+    mutations: {
+      retry: false,
+    },
   },
 });
