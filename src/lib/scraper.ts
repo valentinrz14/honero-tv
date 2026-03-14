@@ -170,14 +170,14 @@ export function scrapeChannels(): Promise<{
     _resolveChannels = resolve;
     _rejectChannels = reject;
 
-    // Timeout after 20 seconds
+    // Timeout after 30 seconds (page needs time for external JS to render DOM)
     _scrapeTimeout = setTimeout(() => {
       if (_rejectChannels) {
-        _rejectChannels(new Error('Scraping timed out after 20s'));
+        _rejectChannels(new Error('Scraping timed out after 30s'));
         _resolveChannels = null;
         _rejectChannels = null;
       }
-    }, 20000);
+    }, 30000);
   });
 }
 

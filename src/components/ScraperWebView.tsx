@@ -1,4 +1,4 @@
-import React, {useRef, useCallback, useEffect, useState} from 'react';
+import React, {useRef, useCallback, useState} from 'react';
 import {View, StyleSheet} from 'react-native';
 import {WebView} from 'react-native-webview';
 import {
@@ -6,7 +6,6 @@ import {
   SCRAPE_INJECTION_JS,
   onScrapeResult,
   onScrapeError,
-  isScraping,
 } from '@/lib/scraper';
 
 const USER_AGENT =
@@ -15,7 +14,7 @@ const USER_AGENT =
 /**
  * Hidden WebView that loads pelisjuanita.com/tv/ and scrapes channel data.
  * Must be mounted in the component tree for scraping to work.
- * The WebView is 1x1 pixel and positioned off-screen.
+ * The WebView is positioned off-screen.
  */
 export const ScraperWebView: React.FC = () => {
   const webViewRef = useRef<WebView>(null);
@@ -30,7 +29,6 @@ export const ScraperWebView: React.FC = () => {
         console.log(`ScraperWebView: received ${data.total} channels`);
         hasScraped.current = true;
         onScrapeResult(data.channels || []);
-        // Hide WebView after successful scrape
         setShouldLoad(false);
       } else if (data.type === 'scrape_error') {
         console.log('ScraperWebView error:', data.error);
@@ -42,10 +40,14 @@ export const ScraperWebView: React.FC = () => {
   }, []);
 
   const handleLoadEnd = useCallback(() => {
-    // Inject the scraping script after page loads
     if (webViewRef.current && !hasScraped.current) {
       console.log('ScraperWebView: page loaded, injecting scrape script');
-      webViewRef.current.injectJavaScript(SCRAPE_INJECTION_JS);
+      // Wait for dynamic JS on the page to finish rendering DOM elements
+      setTimeout(() => {
+        if (webViewRef.current && !hasScraped.current) {
+          webViewRef.current.injectJavaScript(SCRAPE_INJECTION_JS);
+        }
+      }, 2000);
     }
   }, []);
 
@@ -72,14 +74,11 @@ export const ScraperWebView: React.FC = () => {
         domStorageEnabled
         userAgent={USER_AGENT}
         cacheEnabled
-        // Don't play any media
+        thirdPartyCookiesEnabled
         mediaPlaybackRequiresUserAction
-        // Minimize resource usage
         setSupportMultipleWindows={false}
-        // Block navigation away from the page
-        onShouldStartLoadWithRequest={request => {
-          return request.url.includes('pelisjuanita.com');
-        }}
+        mixedContentMode="always"
+        originWhitelist={['*']}
       />
     </View>
   );
