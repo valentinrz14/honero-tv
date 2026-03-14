@@ -12,12 +12,8 @@ import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {SearchBar} from '@/components/SearchBar';
 import {CategoryRow} from '@/components/CategoryRow';
 import {ChannelCard} from '@/components/ChannelCard';
-import {
-  Channel,
-  categories,
-  channels,
-  getChannelsByCategory,
-} from '@/data/channels';
+import {Channel} from '@/data/channels';
+import {useChannels, useCategories} from '@/hooks/useChannels';
 import {useRecentChannels, useAddRecentChannel} from '@/hooks/useRecentChannels';
 import {Colors, Spacing, FontSizes} from '@/theme/colors';
 import {RootStackParamList} from '@/navigation/AppNavigator';
@@ -26,6 +22,8 @@ type HomeNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
 export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<HomeNavigationProp>();
+  const allChannels = useChannels();
+  const allCategories = useCategories();
   const {data: recentChannelIds = []} = useRecentChannels();
   const addRecent = useAddRecentChannel();
 
@@ -40,9 +38,9 @@ export const HomeScreen: React.FC = () => {
   const recentChannels = useMemo(
     () =>
       recentChannelIds
-        .map(id => channels.find(ch => ch.id === id))
+        .map(id => allChannels.find(ch => ch.id === id))
         .filter(Boolean) as Channel[],
-    [recentChannelIds],
+    [recentChannelIds, allChannels],
   );
 
   const renderHeader = () => (
@@ -92,7 +90,7 @@ export const HomeScreen: React.FC = () => {
         </View>
         <FlatList
           horizontal
-          data={channels.slice(0, 6)}
+          data={allChannels.slice(0, 6)}
           keyExtractor={item => `featured-${item.id}`}
           renderItem={({item}) => (
             <ChannelCard
@@ -109,9 +107,9 @@ export const HomeScreen: React.FC = () => {
     </View>
   );
 
-  const categoryData = categories.map(cat => ({
+  const categoryData = allCategories.map(cat => ({
     category: cat,
-    channels: getChannelsByCategory(cat.id),
+    channels: allChannels.filter(ch => ch.category === cat.id),
   }));
 
   return (

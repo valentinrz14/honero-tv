@@ -7,7 +7,8 @@ import {
   TouchableOpacity,
   TVFocusGuideView,
 } from 'react-native';
-import {Channel, getCategoryById} from '@/data/channels';
+import {Channel} from '@/data/channels';
+import {useCategories} from '@/hooks/useChannels';
 import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
 
 interface ChannelCardProps {
@@ -24,7 +25,8 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   showCategory = false,
 }) => {
   const [focused, setFocused] = useState(false);
-  const category = getCategoryById(channel.category);
+  const allCategories = useCategories();
+  const category = allCategories.find(c => c.id === channel.category);
 
   const dimensions = {
     small: {width: 160, height: 100},

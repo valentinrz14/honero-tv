@@ -8,11 +8,13 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import {WebView, WebViewNavigation} from 'react-native-webview';
-import {Channel, getChannelUrl} from '@/data/channels';
+import {Channel, StreamOption, getChannelUrl} from '@/data/channels';
 import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
 
 interface VideoPlayerProps {
   channel: Channel;
+  /** If provided, loads this stream URL directly instead of the tvlibr3 page */
+  streamOption?: StreamOption | null;
   onError?: (error: any) => void;
 }
 
@@ -27,6 +29,21 @@ const BLOCKED_DOMAINS = [
   'popunder',
   'adnxs.com',
   'adsrvr.org',
+  'googletagmanager.com',
+  'google-analytics.com',
+  'facebook.net',
+  'hotjar.com',
+  'propellerads.com',
+  'exoclick.com',
+  'juicyads.com',
+  'trafficjunky.com',
+  'clickadu.com',
+  'hilltopads.net',
+  'ad-maven.com',
+  'admaven.com',
+  'revenuehits.com',
+  'popcash.net',
+  'clickaine.com',
 ];
 
 // CSS to hide site chrome and make iframe player fullscreen
@@ -37,9 +54,13 @@ const INJECTED_CSS = `
   .wrap.privce, .note, .about, .watching-card,
   .helper-links, .ops, .actions-row, .server-links,
   [class*="banner"], [class*="cookie"], [class*="popup"],
-  [class*="social"], [class*="share"],
+  [class*="social"], [class*="share"], [class*="overlay"],
   [id*="header"], [id*="footer"], [id*="sidebar"],
-  .breadcrumb, .page-title, .channel-info-box {
+  [id*="overlay"], [id*="modal"], [id*="popup"],
+  .breadcrumb, .page-title, .channel-info-box,
+  .ads, .ad, [class*="advert"], [class*="sponsor"],
+  [id*="ad-"], [id*="ads"], div[class*="close"],
+  a[target="_blank"], .btn-close, .close-btn {
     display: none !important;
     visibility: hidden !important;
     height: 0 !important;
@@ -72,7 +93,8 @@ const INJECTED_CSS = `
   }
 
   /* Make the player iframe fullscreen */
-  iframe#iframe, iframe[name="iframe"] {
+  iframe#iframe, iframe[name="iframe"],
+  iframe:first-of-type {
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
@@ -119,6 +141,9 @@ const INJECTED_JS = `
     // Block popup/ad scripts before they execute
     window.open = function() { return null; };
     window.aclib = { runPop: function() {} };
+    window.alert = function() {};
+    window.confirm = function() { return false; };
+    window.prompt = function() { return null; };
 
     // Inject CSS
     var style = document.createElement('style');
@@ -126,8 +151,24 @@ const INJECTED_JS = `
     document.head.appendChild(style);
 
     // Remove ad scripts
-    var scripts = document.querySelectorAll('script[src*="acscdn"], script[src*="sharethis"], script[src*="aclib"]');
+    var scripts = document.querySelectorAll('script[src*="acscdn"], script[src*="sharethis"], script[src*="aclib"], script[src*="popads"], script[src*="propeller"], script[src*="exoclick"]');
     scripts.forEach(function(s) { s.remove(); });
+
+    // Remove all overlays, popups, modals
+    function removeOverlays() {
+      var overlays = document.querySelectorAll(
+        '[class*="overlay"], [class*="popup"], [class*="modal"], [id*="overlay"], [id*="popup"], [id*="modal"], [class*="close"], .ads, .ad, [class*="advert"]'
+      );
+      overlays.forEach(function(el) {
+        // Don't remove the video/iframe container
+        if (!el.querySelector('video') && !el.querySelector('iframe') && el.tagName !== 'VIDEO' && el.tagName !== 'IFRAME') {
+          el.style.display = 'none';
+          el.style.visibility = 'hidden';
+        }
+      });
+    }
+
+    removeOverlays();
 
     // Re-apply CSS on DOM changes (dynamic content)
     var applied = false;
@@ -138,6 +179,7 @@ const INJECTED_JS = `
           var s = document.createElement('style');
           s.textContent = ${JSON.stringify(INJECTED_CSS)};
           document.head.appendChild(s);
+          removeOverlays();
           applied = false;
         }, 100);
       }
@@ -164,11 +206,36 @@ const INJECTED_JS = `
 const INJECTED_JS_BEFORE = `
   window.open = function() { return null; };
   window.aclib = { runPop: function() {} };
+  window.alert = function() {};
+  window.confirm = function() { return false; };
+  window.prompt = function() { return null; };
+
+  // Block createElement for ad iframes
+  var origCreate = document.createElement.bind(document);
+  document.createElement = function(tag) {
+    var el = origCreate(tag);
+    if (tag.toLowerCase() === 'iframe') {
+      var origSetAttr = el.setAttribute.bind(el);
+      el.setAttribute = function(name, value) {
+        if (name === 'src' && value) {
+          var blocked = ${JSON.stringify(BLOCKED_DOMAINS)};
+          for (var i = 0; i < blocked.length; i++) {
+            if (value.indexOf(blocked[i]) !== -1) {
+              return;
+            }
+          }
+        }
+        return origSetAttr(name, value);
+      };
+    }
+    return el;
+  };
   true;
 `;
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   channel,
+  streamOption,
   onError,
 }) => {
   const webViewRef = useRef<WebView>(null);
@@ -177,7 +244,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [httpError, setHttpError] = useState(false);
   const mainUrlLoaded = useRef(false);
 
-  const channelUrl = getChannelUrl(channel);
+  // If a stream option is provided, use its URL directly; otherwise fall back to tvlibr3
+  const channelUrl = streamOption
+    ? streamOption.streamUrl
+    : getChannelUrl(channel);
 
   const handleLoadEnd = useCallback(() => {
     // Only clear loading once the main page has had time to render
@@ -188,27 +258,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const handleHttpError = useCallback(
     (syntheticEvent: any) => {
       const {nativeEvent} = syntheticEvent;
-      // Only show error for the main URL, not for sub-resources or ad URLs
       const statusCode = nativeEvent?.statusCode;
       const url = nativeEvent?.url || '';
 
-      // Ignore errors from ad domains and sub-resources
+      // Ignore errors from ad domains
       const isAdUrl = BLOCKED_DOMAINS.some(d => url.includes(d));
       if (isAdUrl) return;
 
-      // Only treat 4xx/5xx on main page as real errors
-      if (statusCode >= 400 && url.includes('tvlibr3.com')) {
-        setHttpError(true);
-        setLoading(false);
-        onError?.(nativeEvent);
+      // Only treat 4xx/5xx on the main page as real errors
+      if (statusCode >= 400) {
+        // If using stream option, any 4xx/5xx is a real error
+        // If using tvlibr3, only errors from tvlibr3 domain
+        const isMainUrl = streamOption
+          ? url === channelUrl || url.startsWith(channelUrl)
+          : url.includes('tvlibr3.com');
+
+        if (isMainUrl) {
+          setHttpError(true);
+          setLoading(false);
+          onError?.(nativeEvent);
+        }
       }
     },
-    [onError],
+    [onError, streamOption, channelUrl],
   );
 
   const handleError = useCallback(
     (syntheticEvent: any) => {
-      // Only show error if main page completely failed to load
       if (!mainUrlLoaded.current) {
         setError(true);
         setLoading(false);
@@ -290,6 +366,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           />
           <ActivityIndicator size="large" color={Colors.accent} />
           <Text style={styles.loadingText}>Cargando {channel.name}...</Text>
+          {streamOption && (
+            <Text style={styles.loadingSubtext}>
+              {streamOption.label}
+            </Text>
+          )}
         </View>
       )}
 
@@ -312,6 +393,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         <View style={styles.channelBadge}>
           <View style={styles.liveDot} />
           <Text style={styles.channelBadgeText}>{channel.name}</Text>
+          {streamOption && (
+            <Text style={styles.streamLabel}> - {streamOption.label}</Text>
+          )}
         </View>
       )}
     </View>
@@ -344,6 +428,11 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.lg,
     color: Colors.textPrimary,
     marginTop: Spacing.md,
+  },
+  loadingSubtext: {
+    fontSize: FontSizes.md,
+    color: Colors.textSecondary,
+    marginTop: Spacing.sm,
   },
   errorOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -401,5 +490,9 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.sm,
     color: Colors.white,
     fontWeight: '600',
+  },
+  streamLabel: {
+    fontSize: FontSizes.xs,
+    color: Colors.textSecondary,
   },
 });

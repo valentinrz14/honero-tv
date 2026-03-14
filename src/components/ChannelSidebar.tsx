@@ -8,7 +8,8 @@ import {
   SectionList,
   Animated,
 } from 'react-native';
-import {Channel, categories, getChannelsByCategory} from '@/data/channels';
+import {Channel} from '@/data/channels';
+import {useChannels, useCategories} from '@/hooks/useChannels';
 import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
 
 interface ChannelSidebarProps {
@@ -39,12 +40,15 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
     }).start();
   }, [visible, slideAnim]);
 
-  const sections: SectionData[] = categories
+  const allChannels = useChannels();
+  const allCategories = useCategories();
+
+  const sections: SectionData[] = allCategories
     .map(cat => ({
       title: cat.name,
       color: cat.color,
       icon: cat.icon,
-      data: getChannelsByCategory(cat.id),
+      data: allChannels.filter(ch => ch.category === cat.id),
     }))
     .filter(s => s.data.length > 0);
 

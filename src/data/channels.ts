@@ -1,3 +1,11 @@
+export interface StreamOption {
+  id: string;
+  label: string;
+  streamUrl: string;
+  hasAds: boolean;
+  priority: number;
+}
+
 export interface Channel {
   id: string;
   name: string;
@@ -8,6 +16,8 @@ export interface Channel {
   description?: string;
   /** true if this channel uses the /eventos/sin-chat/ URL pattern */
   isEvento?: boolean;
+  /** Stream options fetched from Supabase */
+  streamOptions?: StreamOption[];
 }
 
 export interface Category {

@@ -7,7 +7,8 @@ import {
   TouchableOpacity,
   FlatList,
 } from 'react-native';
-import {Channel, searchChannels} from '@/data/channels';
+import {Channel} from '@/data/channels';
+import {useSearchChannels} from '@/hooks/useChannels';
 import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
 
 interface SearchBarProps {
@@ -17,15 +18,10 @@ interface SearchBarProps {
 export const SearchBar: React.FC<SearchBarProps> = ({onChannelSelect}) => {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
-  const [results, setResults] = useState<Channel[]>([]);
+  const results = useSearchChannels(query);
 
   const handleSearch = useCallback((text: string) => {
     setQuery(text);
-    if (text.length >= 2) {
-      setResults(searchChannels(text));
-    } else {
-      setResults([]);
-    }
   }, []);
 
   const handleSelect = useCallback(
