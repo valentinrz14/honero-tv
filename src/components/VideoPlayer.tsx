@@ -1,4 +1,4 @@
-import React, {useState, useRef, useCallback} from 'react';
+import React, {useState, useRef, useCallback, useEffect} from 'react';
 import {
   View,
   Text,
@@ -8,13 +8,15 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import {WebView, WebViewNavigation} from 'react-native-webview';
-import {Channel, StreamOption, getChannelUrl} from '@/data/channels';
+import {Channel, getChannelUrl} from '@/data/channels';
 import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
+
+// Modern Chrome user agent - avoids "Dispositivo no compatible" checks
+const USER_AGENT =
+  'Mozilla/5.0 (Linux; Android 14; Chromecast HD) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 interface VideoPlayerProps {
   channel: Channel;
-  /** If provided, loads this stream URL directly instead of the tvlibr3 page */
-  streamOption?: StreamOption | null;
   onError?: (error: any) => void;
 }
 
@@ -44,28 +46,116 @@ const BLOCKED_DOMAINS = [
   'revenuehits.com',
   'popcash.net',
   'clickaine.com',
+  'pushnotifications',
+  'onesignal.com',
+  'monetag.com',
+  'bidswitch.net',
+  'outbrain.com',
+  'taboola.com',
 ];
 
-// CSS to hide site chrome and make iframe player fullscreen
-const INJECTED_CSS = `
-  /* Hide site chrome */
+// --- Phase 1: JS to scrape stream options from tvlibr3 channel page ---
+const SCRAPER_JS = `
+  (function() {
+    'use strict';
+    // Block popups immediately
+    window.open = function() { return null; };
+    window.aclib = { runPop: function() {} };
+    window.alert = function() {};
+
+    function extractStreamOptions() {
+      var options = [];
+      // Look for server-links nav with option links
+      var links = document.querySelectorAll('.server-links a, nav.server-links a, .opciones a, .options a');
+
+      links.forEach(function(link, index) {
+        var onclick = link.getAttribute('onclick') || '';
+        // Extract URL from onclick="document.getElementById('iframe').src='URL'; return false;"
+        var match = onclick.match(/\\.src\\s*=\\s*'([^']+)'/);
+        if (!match) {
+          match = onclick.match(/\\.src\\s*=\\s*"([^"]+)"/);
+        }
+        if (match && match[1]) {
+          var label = (link.textContent || '').trim() || ('Opcion ' + (index + 1));
+          var hasAds = label.toLowerCase().indexOf('ads') !== -1 || label.toLowerCase().indexOf('ad') !== -1;
+          options.push({
+            url: match[1],
+            label: label,
+            hasAds: hasAds,
+            priority: index
+          });
+        }
+      });
+
+      // Also check if there's a direct iframe already loaded
+      if (options.length === 0) {
+        var iframe = document.querySelector('iframe#iframe, iframe[name="iframe"], .iframe-wrap iframe');
+        if (iframe && iframe.src && iframe.src !== 'about:blank' && iframe.src.indexOf('tvlibr3') === -1) {
+          options.push({
+            url: iframe.src,
+            label: 'Principal',
+            hasAds: false,
+            priority: 0
+          });
+        }
+      }
+
+      return options;
+    }
+
+    // Try immediately, then retry after short delays (page might load dynamically)
+    function tryExtract(attempts) {
+      var options = extractStreamOptions();
+      if (options.length > 0) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'stream_options',
+          options: options
+        }));
+      } else if (attempts < 5) {
+        setTimeout(function() { tryExtract(attempts + 1); }, 1000);
+      } else {
+        // No options found - tell RN to just play the page as-is
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'stream_options',
+          options: []
+        }));
+      }
+    }
+
+    // Wait for DOM to be ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function() { tryExtract(0); });
+    } else {
+      tryExtract(0);
+    }
+  })();
+  true;
+`;
+
+// --- Phase 2: CSS/JS to clean up stream provider page ---
+const STREAM_CSS = `
+  /* Hide everything that's not the player */
   header, footer, nav, aside,
-  .channel-aside, .player-actions, .canal-wrap > h1,
-  .wrap.privce, .note, .about, .watching-card,
-  .helper-links, .ops, .actions-row, .server-links,
   [class*="banner"], [class*="cookie"], [class*="popup"],
-  [class*="social"], [class*="share"], [class*="overlay"],
+  [class*="social"], [class*="share"], [class*="overlay"]:not(:has(video)):not(:has(iframe)),
   [id*="header"], [id*="footer"], [id*="sidebar"],
-  [id*="overlay"], [id*="modal"], [id*="popup"],
-  .breadcrumb, .page-title, .channel-info-box,
-  .ads, .ad, [class*="advert"], [class*="sponsor"],
-  [id*="ad-"], [id*="ads"], div[class*="close"],
-  a[target="_blank"], .btn-close, .close-btn {
+  [id*="overlay"]:not(:has(video)):not(:has(iframe)),
+  [id*="modal"]:not(:has(video)):not(:has(iframe)),
+  [id*="popup"], [class*="advert"], [class*="sponsor"],
+  [id*="ad-"], [id*="ads"], .ads, .ad,
+  a[target="_blank"], .btn-close, .close-btn,
+  div[class*="close"]:not(:has(video)),
+  [class*="compatible"], [class*="device-check"],
+  [class*="blocker"], [class*="warning"]:not(:has(video)) {
     display: none !important;
     visibility: hidden !important;
     height: 0 !important;
+    width: 0 !important;
     overflow: hidden !important;
     pointer-events: none !important;
+    opacity: 0 !important;
+    position: absolute !important;
+    z-index: -1 !important;
   }
 
   /* Dark background */
@@ -78,9 +168,10 @@ const INJECTED_CSS = `
     height: 100vh !important;
   }
 
-  /* Remove all padding/margins from containers */
-  .wrap, .canal-wrap, main, .channel-layout,
-  .player-card, .iframe-wrap, article {
+  /* Make player containers fullscreen */
+  .wrap, main, article, section, .player-card,
+  .iframe-wrap, .player, .video-container,
+  [class*="player"], [class*="video-wrap"] {
     margin: 0 !important;
     padding: 0 !important;
     max-width: 100vw !important;
@@ -90,11 +181,11 @@ const INJECTED_CSS = `
     top: 0 !important;
     left: 0 !important;
     display: block !important;
+    background: #000 !important;
   }
 
-  /* Make the player iframe fullscreen */
-  iframe#iframe, iframe[name="iframe"],
-  iframe:first-of-type {
+  /* Make iframes fullscreen */
+  iframe {
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
@@ -104,25 +195,10 @@ const INJECTED_CSS = `
     max-height: 100vh !important;
     z-index: 99999 !important;
     border: none !important;
-    aspect-ratio: auto !important;
     margin: 0 !important;
   }
 
-  /* For pages without named iframe, target main video/iframe */
-  .iframe-wrap iframe:only-child,
-  article iframe:first-of-type {
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
-    width: 100vw !important;
-    height: 100vh !important;
-    z-index: 99999 !important;
-    border: none !important;
-    aspect-ratio: auto !important;
-    margin: 0 !important;
-  }
-
-  /* Fullscreen video elements too */
+  /* Fullscreen video elements */
   video {
     position: fixed !important;
     top: 0 !important;
@@ -132,13 +208,23 @@ const INJECTED_CSS = `
     z-index: 99999 !important;
     object-fit: contain !important;
   }
+
+  /* Remove any blur/filter effects */
+  * {
+    -webkit-filter: none !important;
+    filter: none !important;
+  }
+  video, iframe {
+    -webkit-filter: none !important;
+    filter: none !important;
+  }
 `;
 
-const INJECTED_JS = `
+const STREAM_JS = `
   (function() {
     'use strict';
 
-    // Block popup/ad scripts before they execute
+    // Block popups and ads
     window.open = function() { return null; };
     window.aclib = { runPop: function() {} };
     window.alert = function() {};
@@ -147,113 +233,216 @@ const INJECTED_JS = `
 
     // Inject CSS
     var style = document.createElement('style');
-    style.textContent = ${JSON.stringify(INJECTED_CSS)};
+    style.textContent = ${JSON.stringify(STREAM_CSS)};
     document.head.appendChild(style);
 
     // Remove ad scripts
-    var scripts = document.querySelectorAll('script[src*="acscdn"], script[src*="sharethis"], script[src*="aclib"], script[src*="popads"], script[src*="propeller"], script[src*="exoclick"]');
-    scripts.forEach(function(s) { s.remove(); });
+    document.querySelectorAll('script[src*="acscdn"], script[src*="sharethis"], script[src*="aclib"], script[src*="popads"], script[src*="propeller"], script[src*="exoclick"], script[src*="monetag"]').forEach(function(s) { s.remove(); });
 
-    // Remove all overlays, popups, modals
-    function removeOverlays() {
-      var overlays = document.querySelectorAll(
-        '[class*="overlay"], [class*="popup"], [class*="modal"], [id*="overlay"], [id*="popup"], [id*="modal"], [class*="close"], .ads, .ad, [class*="advert"]'
-      );
-      overlays.forEach(function(el) {
-        // Don't remove the video/iframe container
-        if (!el.querySelector('video') && !el.querySelector('iframe') && el.tagName !== 'VIDEO' && el.tagName !== 'IFRAME') {
+    // Aggressively remove overlays and "device not compatible" messages
+    function cleanPage() {
+      // Remove all absolute/fixed positioned overlays that aren't the video
+      document.querySelectorAll('div, section, aside').forEach(function(el) {
+        var style = window.getComputedStyle(el);
+        var isOverlay = (style.position === 'fixed' || style.position === 'absolute') &&
+                        (style.zIndex > 100 || style.backgroundColor.indexOf('rgba') !== -1);
+        if (isOverlay && !el.querySelector('video') && !el.querySelector('iframe') &&
+            el.tagName !== 'VIDEO' && el.tagName !== 'IFRAME') {
           el.style.display = 'none';
           el.style.visibility = 'hidden';
         }
       });
+
+      // Remove "device not compatible" or blur elements
+      document.querySelectorAll('*').forEach(function(el) {
+        var text = (el.textContent || '').toLowerCase();
+        var isDeviceMsg = text.indexOf('dispositivo no compatible') !== -1 ||
+                          text.indexOf('device not compatible') !== -1 ||
+                          text.indexOf('not supported') !== -1 ||
+                          text.indexOf('no soportado') !== -1;
+        if (isDeviceMsg && !el.querySelector('video') && !el.querySelector('iframe')) {
+          el.style.display = 'none';
+        }
+      });
+
+      // Remove blur from everything
+      document.querySelectorAll('*').forEach(function(el) {
+        var style = window.getComputedStyle(el);
+        if (style.filter && style.filter !== 'none') {
+          el.style.filter = 'none';
+          el.style.webkitFilter = 'none';
+        }
+      });
+
+      // Re-apply CSS
+      var s = document.createElement('style');
+      s.textContent = ${JSON.stringify(STREAM_CSS)};
+      document.head.appendChild(s);
     }
 
-    removeOverlays();
+    cleanPage();
 
-    // Re-apply CSS on DOM changes (dynamic content)
-    var applied = false;
+    // Observe DOM changes and re-clean
     var observer = new MutationObserver(function() {
-      if (!applied) {
-        applied = true;
-        setTimeout(function() {
-          var s = document.createElement('style');
-          s.textContent = ${JSON.stringify(INJECTED_CSS)};
-          document.head.appendChild(s);
-          removeOverlays();
-          applied = false;
-        }, 100);
-      }
+      setTimeout(cleanPage, 200);
     });
     if (document.body) {
       observer.observe(document.body, { childList: true, subtree: true });
     }
 
-    // Auto-click play buttons after a delay
+    // Auto-click play buttons
     setTimeout(function() {
       var playBtns = document.querySelectorAll(
-        '[class*="play"], button[aria-label*="play"], .vjs-big-play-button, .ytp-large-play-button'
+        '[class*="play"], button[aria-label*="play"], .vjs-big-play-button, .ytp-large-play-button, .plyr__control--overlaid'
       );
       playBtns.forEach(function(btn) { try { btn.click(); } catch(e) {} });
-    }, 3000);
 
-    // Notify RN that page loaded OK
+      // Try clicking any center-positioned button (often play buttons)
+      document.querySelectorAll('button, [role="button"]').forEach(function(btn) {
+        var rect = btn.getBoundingClientRect();
+        var centerX = window.innerWidth / 2;
+        var centerY = window.innerHeight / 2;
+        if (Math.abs(rect.left + rect.width/2 - centerX) < 200 &&
+            Math.abs(rect.top + rect.height/2 - centerY) < 200) {
+          try { btn.click(); } catch(e) {}
+        }
+      });
+    }, 2000);
+
+    // Second attempt to click play
+    setTimeout(function() {
+      document.querySelectorAll('[class*="play"], .vjs-big-play-button').forEach(function(btn) {
+        try { btn.click(); } catch(e) {}
+      });
+    }, 5000);
+
+    // Notify RN that page loaded
     window.ReactNativeWebView.postMessage(JSON.stringify({type: 'loaded'}));
   })();
   true;
 `;
 
-// JS injected BEFORE the page loads (blocks ads early)
-const INJECTED_JS_BEFORE = `
+const STREAM_JS_BEFORE = `
   window.open = function() { return null; };
   window.aclib = { runPop: function() {} };
   window.alert = function() {};
   window.confirm = function() { return false; };
   window.prompt = function() { return null; };
-
-  // Block createElement for ad iframes
-  var origCreate = document.createElement.bind(document);
-  document.createElement = function(tag) {
-    var el = origCreate(tag);
-    if (tag.toLowerCase() === 'iframe') {
-      var origSetAttr = el.setAttribute.bind(el);
-      el.setAttribute = function(name, value) {
-        if (name === 'src' && value) {
-          var blocked = ${JSON.stringify(BLOCKED_DOMAINS)};
-          for (var i = 0; i < blocked.length; i++) {
-            if (value.indexOf(blocked[i]) !== -1) {
-              return;
-            }
-          }
-        }
-        return origSetAttr(name, value);
-      };
-    }
-    return el;
-  };
   true;
 `;
 
+type Phase = 'scraping' | 'playing';
+
+interface ScrapedOption {
+  url: string;
+  label: string;
+  hasAds: boolean;
+  priority: number;
+}
+
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   channel,
-  streamOption,
   onError,
 }) => {
   const webViewRef = useRef<WebView>(null);
+  const [phase, setPhase] = useState<Phase>('scraping');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [httpError, setHttpError] = useState(false);
+  const [statusText, setStatusText] = useState('Buscando señales...');
+  const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [streamLabel, setStreamLabel] = useState<string>('');
   const mainUrlLoaded = useRef(false);
+  const channelIdRef = useRef(channel.id);
 
-  // If a stream option is provided, use its URL directly; otherwise fall back to tvlibr3
-  const channelUrl = streamOption
-    ? streamOption.streamUrl
-    : getChannelUrl(channel);
+  // Reset state when channel changes
+  useEffect(() => {
+    if (channelIdRef.current !== channel.id) {
+      channelIdRef.current = channel.id;
+      setPhase('scraping');
+      setLoading(true);
+      setError(false);
+      setHttpError(false);
+      setStreamUrl(null);
+      setStreamLabel('');
+      setStatusText('Buscando señales...');
+      mainUrlLoaded.current = false;
+    }
+  }, [channel.id]);
+
+  // If channel has stream options from Supabase, skip scraping
+  useEffect(() => {
+    const options = channel.streamOptions || [];
+    if (options.length > 0) {
+      // Sort: non-ads first, then by priority
+      const sorted = [...options].sort((a, b) => {
+        if (a.hasAds !== b.hasAds) return a.hasAds ? 1 : -1;
+        return a.priority - b.priority;
+      });
+      setStreamUrl(sorted[0].streamUrl);
+      setStreamLabel(sorted[0].label);
+      setPhase('playing');
+    }
+  }, [channel]);
+
+  const tvlibr3Url = getChannelUrl(channel);
+
+  // Handle messages from injected JS
+  const handleMessage = useCallback(
+    (event: any) => {
+      try {
+        const data = JSON.parse(event.nativeEvent.data);
+
+        if (data.type === 'stream_options' && phase === 'scraping') {
+          const options: ScrapedOption[] = data.options || [];
+
+          if (options.length === 0) {
+            // No options found - play the tvlibr3 page as-is
+            setPhase('playing');
+            setStreamUrl(null); // will use tvlibr3Url
+            setStreamLabel('');
+            return;
+          }
+
+          // Sort: non-ads first, then by priority
+          const sorted = [...options].sort((a, b) => {
+            if (a.hasAds !== b.hasAds) return a.hasAds ? 1 : -1;
+            return a.priority - b.priority;
+          });
+
+          setStatusText(`Probando ${sorted.length} opciones...`);
+
+          // Test each option and use the first working one
+          testStreamOptions(sorted).then(working => {
+            if (working) {
+              setStreamUrl(working.url);
+              setStreamLabel(working.label);
+              setPhase('playing');
+            } else {
+              // None worked - fall back to first option anyway
+              setStreamUrl(sorted[0].url);
+              setStreamLabel(sorted[0].label);
+              setPhase('playing');
+            }
+          });
+        }
+
+        if (data.type === 'loaded' && phase === 'playing') {
+          setLoading(false);
+        }
+      } catch {
+        // ignore
+      }
+    },
+    [phase],
+  );
 
   const handleLoadEnd = useCallback(() => {
-    // Only clear loading once the main page has had time to render
     mainUrlLoaded.current = true;
-    setTimeout(() => setLoading(false), 1500);
-  }, []);
+    if (phase === 'playing') {
+      setTimeout(() => setLoading(false), 1500);
+    }
+  }, [phase]);
 
   const handleHttpError = useCallback(
     (syntheticEvent: any) => {
@@ -261,58 +450,37 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const statusCode = nativeEvent?.statusCode;
       const url = nativeEvent?.url || '';
 
-      // Ignore errors from ad domains
+      if (phase === 'scraping') return; // Ignore errors during scraping
+
       const isAdUrl = BLOCKED_DOMAINS.some(d => url.includes(d));
       if (isAdUrl) return;
 
-      // Only treat 4xx/5xx on the main page as real errors
       if (statusCode >= 400) {
-        // If using stream option, any 4xx/5xx is a real error
-        // If using tvlibr3, only errors from tvlibr3 domain
-        const isMainUrl = streamOption
-          ? url === channelUrl || url.startsWith(channelUrl)
-          : url.includes('tvlibr3.com');
-
-        if (isMainUrl) {
-          setHttpError(true);
-          setLoading(false);
-          onError?.(nativeEvent);
-        }
+        setHttpError(true);
+        setLoading(false);
+        onError?.(nativeEvent);
       }
     },
-    [onError, streamOption, channelUrl],
+    [onError, phase],
   );
 
   const handleError = useCallback(
     (syntheticEvent: any) => {
+      if (phase === 'scraping') return;
       if (!mainUrlLoaded.current) {
         setError(true);
         setLoading(false);
         onError?.(syntheticEvent.nativeEvent);
       }
     },
-    [onError],
+    [onError, phase],
   );
 
-  const handleMessage = useCallback((event: any) => {
-    try {
-      const data = JSON.parse(event.nativeEvent.data);
-      if (data.type === 'loaded') {
-        setLoading(false);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  // Block navigation to ad/popup URLs
   const handleShouldStartLoad = useCallback(
     (event: WebViewNavigation) => {
       const {url} = event;
-      // Block known ad domains
       const isBlocked = BLOCKED_DOMAINS.some(d => url.includes(d));
       if (isBlocked) return false;
-      // Block about:blank popups
       if (url === 'about:blank') return false;
       return true;
     },
@@ -323,25 +491,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setError(false);
     setHttpError(false);
     setLoading(true);
+    setPhase('scraping');
+    setStreamUrl(null);
+    setStreamLabel('');
     mainUrlLoaded.current = false;
-    webViewRef.current?.reload();
   }, []);
 
   const showError = error || httpError;
+
+  // Determine what URL and JS to use based on phase
+  const currentUrl = phase === 'scraping' ? tvlibr3Url : (streamUrl || tvlibr3Url);
+  const currentJS = phase === 'scraping' ? SCRAPER_JS : STREAM_JS;
+  const currentJSBefore = phase === 'scraping' ? STREAM_JS_BEFORE : STREAM_JS_BEFORE;
 
   return (
     <View style={styles.container}>
       <WebView
         ref={webViewRef}
-        source={{uri: channelUrl}}
-        style={styles.webview}
+        key={`${channel.id}-${phase}-${streamUrl || 'default'}`}
+        source={{uri: currentUrl}}
+        style={phase === 'scraping' ? styles.hiddenWebview : styles.webview}
         javaScriptEnabled
         domStorageEnabled
         javaScriptCanOpenWindowsAutomatically={false}
         mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback
-        injectedJavaScript={INJECTED_JS}
-        injectedJavaScriptBeforeContentLoaded={INJECTED_JS_BEFORE}
+        injectedJavaScript={currentJS}
+        injectedJavaScriptBeforeContentLoaded={currentJSBefore}
         onLoadEnd={handleLoadEnd}
         onError={handleError}
         onHttpError={handleHttpError}
@@ -354,23 +530,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         thirdPartyCookiesEnabled
         cacheEnabled
         originWhitelist={['*']}
-        userAgent="Mozilla/5.0 (Linux; Android 10; BRAVIA 4K GB) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        userAgent={USER_AGENT}
       />
 
-      {/* Loading overlay */}
-      {loading && (
+      {/* Loading overlay - shown during scraping and initial playing load */}
+      {(phase === 'scraping' || loading) && !showError && (
         <View style={styles.loadingOverlay}>
           <Image
             source={require('@/assets/hornero-icon.png')}
             style={styles.loadingIcon}
           />
           <ActivityIndicator size="large" color={Colors.accent} />
-          <Text style={styles.loadingText}>Cargando {channel.name}...</Text>
-          {streamOption && (
-            <Text style={styles.loadingSubtext}>
-              {streamOption.label}
-            </Text>
-          )}
+          <Text style={styles.loadingText}>
+            {phase === 'scraping'
+              ? `Buscando señal para ${channel.name}...`
+              : `Cargando ${channel.name}...`}
+          </Text>
+          <Text style={styles.loadingSubtext}>
+            {phase === 'scraping' ? statusText : streamLabel}
+          </Text>
         </View>
       )}
 
@@ -389,18 +567,62 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
 
       {/* Channel name badge - top left */}
-      {!loading && !showError && (
+      {phase === 'playing' && !loading && !showError && (
         <View style={styles.channelBadge}>
           <View style={styles.liveDot} />
           <Text style={styles.channelBadgeText}>{channel.name}</Text>
-          {streamOption && (
-            <Text style={styles.streamLabel}> - {streamOption.label}</Text>
-          )}
+          {streamLabel ? (
+            <Text style={styles.streamLabelText}> - {streamLabel}</Text>
+          ) : null}
         </View>
       )}
     </View>
   );
 };
+
+// Test stream option URLs to find one that works
+async function testStreamOptions(
+  options: ScrapedOption[],
+): Promise<ScrapedOption | null> {
+  for (const option of options) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 6000);
+      const response = await fetch(option.url, {
+        method: 'HEAD',
+        signal: controller.signal,
+        headers: {
+          'User-Agent': USER_AGENT,
+        },
+      });
+      clearTimeout(timeout);
+      if (response.status < 400) {
+        return option;
+      }
+    } catch {
+      // HEAD failed, try GET with minimal data
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 6000);
+        const response = await fetch(option.url, {
+          method: 'GET',
+          signal: controller.signal,
+          headers: {
+            'User-Agent': USER_AGENT,
+            Range: 'bytes=0-0',
+          },
+        });
+        clearTimeout(timeout);
+        if (response.status < 400) {
+          return option;
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return null;
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -410,6 +632,11 @@ const styles = StyleSheet.create({
   webview: {
     flex: 1,
     backgroundColor: Colors.black,
+  },
+  hiddenWebview: {
+    width: 0,
+    height: 0,
+    opacity: 0,
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -428,6 +655,7 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.lg,
     color: Colors.textPrimary,
     marginTop: Spacing.md,
+    textAlign: 'center',
   },
   loadingSubtext: {
     fontSize: FontSizes.md,
@@ -491,7 +719,7 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontWeight: '600',
   },
-  streamLabel: {
+  streamLabelText: {
     fontSize: FontSizes.xs,
     color: Colors.textSecondary,
   },

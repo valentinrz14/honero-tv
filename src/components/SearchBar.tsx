@@ -27,7 +27,6 @@ export const SearchBar: React.FC<SearchBarProps> = ({onChannelSelect}) => {
   const handleSelect = useCallback(
     (channel: Channel) => {
       setQuery('');
-      setResults([]);
       onChannelSelect(channel);
     },
     [onChannelSelect],
