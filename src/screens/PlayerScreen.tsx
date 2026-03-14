@@ -51,8 +51,14 @@ export const PlayerScreen: React.FC = () => {
     await addRecentChannel(channel.id);
   }, []);
 
+  // Navigate back if channel not found (in useEffect to avoid setState during render)
+  useEffect(() => {
+    if (!currentChannel) {
+      navigation.goBack();
+    }
+  }, [currentChannel, navigation]);
+
   if (!currentChannel) {
-    navigation.goBack();
     return null;
   }
 
