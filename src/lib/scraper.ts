@@ -92,6 +92,7 @@ export const SCRAPE_INJECTION_JS = `
         categoria: categoria,
         pais: pais,
         logoSrc: logoSrc,
+        rawOnclick: match ? match[1] : '',
         options: options.map(function(opt) {
           return { url: opt.url || '', nombre: opt.nombre || '' };
         })
@@ -187,12 +188,13 @@ export function isScraping(): boolean {
   return _resolveChannels !== null;
 }
 
-interface RawScrapedChannel {
+export interface RawScrapedChannel {
   slug: string;
   name: string;
   categoria: string;
   pais: string;
   logoSrc: string;
+  rawOnclick: string;
   options: Array<{url: string; nombre: string}>;
 }
 
@@ -209,6 +211,14 @@ function transformScrapedData(rawChannels: RawScrapedChannel[]): {
 
   for (const raw of rawChannels) {
     if (!raw.options || raw.options.length === 0) continue;
+
+    // Skip "Agenda Deportiva" - it's not a real channel
+    if (
+      raw.slug === 'agenda-deportiva' ||
+      raw.name.toLowerCase().includes('agenda deportiva')
+    ) {
+      continue;
+    }
 
     const streamOptions: StreamOption[] = raw.options.map((opt, idx) => {
       let streamUrl = opt.url || '';
@@ -250,6 +260,7 @@ function transformScrapedData(rawChannels: RawScrapedChannel[]): {
       slug: raw.slug,
       logoUrl,
       streamOptions,
+      rawOnclickOptions: raw.rawOnclick || '',
     });
   }
 

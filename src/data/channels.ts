@@ -17,6 +17,8 @@ export interface Channel {
   description?: string;
   /** Stream options parsed from pelisjuanita.com */
   streamOptions?: StreamOption[];
+  /** Raw onclick options JSON string for cambiarOpcion() replay */
+  rawOnclickOptions?: string;
 }
 
 export interface Category {
