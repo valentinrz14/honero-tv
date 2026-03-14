@@ -3,8 +3,7 @@ import {fetchChannelsData, ChannelsData} from '@/lib/channelsApi';
 import {
   Channel,
   Category,
-  channels as hardcodedChannels,
-  categories as hardcodedCategories,
+  categories as fallbackCategories,
 } from '@/data/channels';
 
 export const channelsQueryKey = ['channels'] as const;
@@ -13,25 +12,20 @@ export function useChannelsData() {
   return useQuery<ChannelsData>({
     queryKey: channelsQueryKey,
     queryFn: fetchChannelsData,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 30 * 60 * 1000, // 30 minutes
+    staleTime: 10 * 60 * 1000, // 10 minutes - scraping is heavier than API
+    gcTime: 60 * 60 * 1000, // 1 hour cache
     retry: 2,
-    // Provide hardcoded data as initial/placeholder so the UI renders immediately
-    placeholderData: {
-      categories: hardcodedCategories,
-      channels: hardcodedChannels,
-    },
   });
 }
 
 export function useChannels(): Channel[] {
   const {data} = useChannelsData();
-  return data?.channels || hardcodedChannels;
+  return data?.channels || [];
 }
 
 export function useCategories(): Category[] {
   const {data} = useChannelsData();
-  return data?.categories || hardcodedCategories;
+  return data?.categories || fallbackCategories;
 }
 
 export function useChannelById(channelId: string): Channel | undefined {
@@ -52,6 +46,11 @@ export function useSearchChannels(query: string): Channel[] {
     ch =>
       ch.name.toLowerCase().includes(lower) ||
       ch.category.toLowerCase().includes(lower) ||
-      (ch.description && ch.description.toLowerCase().includes(lower)),
+      (ch.country && ch.country.toLowerCase().includes(lower)),
   );
+}
+
+export function useChannelsLoading(): boolean {
+  const {isLoading} = useChannelsData();
+  return isLoading;
 }

@@ -6,6 +6,7 @@ import {
   StyleSheet,
   FlatList,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import {useNavigation} from '@react-navigation/native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
@@ -13,7 +14,7 @@ import {SearchBar} from '@/components/SearchBar';
 import {CategoryRow} from '@/components/CategoryRow';
 import {ChannelCard} from '@/components/ChannelCard';
 import {Channel} from '@/data/channels';
-import {useChannels, useCategories} from '@/hooks/useChannels';
+import {useChannels, useCategories, useChannelsLoading} from '@/hooks/useChannels';
 import {useRecentChannels, useAddRecentChannel} from '@/hooks/useRecentChannels';
 import {Colors, Spacing, FontSizes} from '@/theme/colors';
 import {RootStackParamList} from '@/navigation/AppNavigator';
@@ -24,6 +25,7 @@ export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<HomeNavigationProp>();
   const allChannels = useChannels();
   const allCategories = useCategories();
+  const isLoadingChannels = useChannelsLoading();
   const {data: recentChannelIds = []} = useRecentChannels();
   const addRecent = useAddRecentChannel();
 
@@ -112,6 +114,19 @@ export const HomeScreen: React.FC = () => {
     channels: allChannels.filter(ch => ch.category === cat.id),
   }));
 
+  if (isLoadingChannels && allChannels.length === 0) {
+    return (
+      <View style={styles.container}>
+        <StatusBar backgroundColor={Colors.background} barStyle="light-content" />
+        <View style={styles.loadingContainer}>
+          <Image source={require('@/assets/hornero-icon.png')} style={styles.loadingIcon} />
+          <ActivityIndicator size="large" color={Colors.accent} />
+          <Text style={styles.loadingText}>Cargando canales...</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <StatusBar backgroundColor={Colors.background} barStyle="light-content" />
@@ -191,5 +206,21 @@ const styles = StyleSheet.create({
   },
   featuredList: {
     paddingHorizontal: Spacing.xl,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    marginBottom: Spacing.md,
+  },
+  loadingText: {
+    fontSize: FontSizes.lg,
+    color: Colors.textPrimary,
+    marginTop: Spacing.md,
   },
 });

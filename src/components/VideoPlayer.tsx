@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import {WebView, WebViewNavigation} from 'react-native-webview';
-import {Channel, getChannelUrl} from '@/data/channels';
+import {Channel, getChannelStreamUrl} from '@/data/channels';
 import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
 
 interface VideoPlayerProps {
@@ -49,17 +49,19 @@ const BLOCKED_DOMAINS = [
   'monetag.com',
 ];
 
-// CSS to hide tvlibr3 site chrome and make iframe fullscreen
+// CSS to make the stream player fullscreen
 const INJECTED_CSS = `
   /* Hide site chrome */
   header, footer, nav, aside,
-  .channel-aside, .player-actions, .canal-wrap > h1,
+  .channel-aside, .player-actions,
   .wrap.privce, .note, .about, .watching-card,
   .helper-links, .ops, .actions-row, .server-links,
   [class*="banner"], [class*="cookie"], [class*="popup"],
   [class*="social"], [class*="share"],
   [id*="header"], [id*="footer"], [id*="sidebar"],
-  .breadcrumb, .page-title, .channel-info-box {
+  .breadcrumb, .page-title, .channel-info-box,
+  .ads, .ad, [class*="ad-"], [id*="ad-"],
+  .overlay, .modal, .popup {
     display: none !important;
     visibility: hidden !important;
     height: 0 !important;
@@ -78,8 +80,8 @@ const INJECTED_CSS = `
   }
 
   /* Remove padding from containers */
-  .wrap, .canal-wrap, main, .channel-layout,
-  .player-card, .iframe-wrap, article {
+  .wrap, main, article, section, .container,
+  .player-card, .iframe-wrap, .video-container {
     margin: 0 !important;
     padding: 0 !important;
     max-width: 100vw !important;
@@ -91,8 +93,8 @@ const INJECTED_CSS = `
     display: block !important;
   }
 
-  /* Make the player iframe fullscreen */
-  iframe#iframe, iframe[name="iframe"] {
+  /* Make iframes fullscreen */
+  iframe {
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
@@ -100,20 +102,6 @@ const INJECTED_CSS = `
     height: 100vh !important;
     max-width: 100vw !important;
     max-height: 100vh !important;
-    z-index: 99999 !important;
-    border: none !important;
-    aspect-ratio: auto !important;
-    margin: 0 !important;
-  }
-
-  /* For pages without named iframe */
-  .iframe-wrap iframe:only-child,
-  article iframe:first-of-type {
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
-    width: 100vw !important;
-    height: 100vh !important;
     z-index: 99999 !important;
     border: none !important;
     aspect-ratio: auto !important;
@@ -138,17 +126,22 @@ const INJECTED_JS = `
 
     // Block popups
     window.open = function() { return null; };
-    window.aclib = { runPop: function() {} };
 
     // Inject CSS
     var style = document.createElement('style');
     style.textContent = ${JSON.stringify(INJECTED_CSS)};
     document.head.appendChild(style);
 
-    // Remove ad scripts
-    document.querySelectorAll('script[src*="acscdn"], script[src*="sharethis"], script[src*="aclib"]').forEach(function(s) { s.remove(); });
+    // Remove ad elements
+    function removeAds() {
+      document.querySelectorAll(
+        'script[src*="acscdn"], script[src*="sharethis"], script[src*="aclib"], ' +
+        '[class*="ad-"], [id*="ad-"], .ads, .ad, .overlay, .modal, .popup'
+      ).forEach(function(el) { el.remove(); });
+    }
+    removeAds();
 
-    // Re-apply CSS once on dynamic changes
+    // Re-apply CSS on dynamic changes
     var applied = false;
     var observer = new MutationObserver(function() {
       if (!applied) {
@@ -157,6 +150,7 @@ const INJECTED_JS = `
           var s = document.createElement('style');
           s.textContent = ${JSON.stringify(INJECTED_CSS)};
           document.head.appendChild(s);
+          removeAds();
           applied = false;
         }, 500);
       }
@@ -181,7 +175,6 @@ const INJECTED_JS = `
 
 const INJECTED_JS_BEFORE = `
   window.open = function() { return null; };
-  window.aclib = { runPop: function() {} };
   true;
 `;
 
@@ -193,9 +186,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [httpError, setHttpError] = useState(false);
+  const [currentOptionIdx, setCurrentOptionIdx] = useState(0);
   const mainUrlLoaded = useRef(false);
 
-  const channelUrl = getChannelUrl(channel);
+  const streamOptions = channel.streamOptions || [];
+  const currentStreamUrl =
+    streamOptions.length > currentOptionIdx
+      ? streamOptions[currentOptionIdx].streamUrl
+      : getChannelStreamUrl(channel);
 
   const handleLoadEnd = useCallback(() => {
     mainUrlLoaded.current = true;
@@ -211,24 +209,38 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const isAdUrl = BLOCKED_DOMAINS.some(d => url.includes(d));
       if (isAdUrl) return;
 
-      if (statusCode >= 400 && url.includes('tvlibr3.com')) {
+      if (statusCode >= 400) {
+        // Try next stream option if available
+        if (currentOptionIdx < streamOptions.length - 1) {
+          setCurrentOptionIdx(prev => prev + 1);
+          setLoading(true);
+          mainUrlLoaded.current = false;
+          return;
+        }
         setHttpError(true);
         setLoading(false);
         onError?.(nativeEvent);
       }
     },
-    [onError],
+    [onError, currentOptionIdx, streamOptions.length],
   );
 
   const handleError = useCallback(
     (syntheticEvent: any) => {
       if (!mainUrlLoaded.current) {
+        // Try next stream option if available
+        if (currentOptionIdx < streamOptions.length - 1) {
+          setCurrentOptionIdx(prev => prev + 1);
+          setLoading(true);
+          mainUrlLoaded.current = false;
+          return;
+        }
         setError(true);
         setLoading(false);
         onError?.(syntheticEvent.nativeEvent);
       }
     },
-    [onError],
+    [onError, currentOptionIdx, streamOptions.length],
   );
 
   const handleMessage = useCallback((event: any) => {
@@ -254,18 +266,32 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setError(false);
     setHttpError(false);
     setLoading(true);
+    setCurrentOptionIdx(0);
     mainUrlLoaded.current = false;
     webViewRef.current?.reload();
   }, []);
 
   const showError = error || httpError;
 
+  if (!currentStreamUrl) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.errorOverlay}>
+          <Text style={styles.errorText}>No hay señal disponible</Text>
+          <Text style={styles.errorSubtext}>
+            Este canal no tiene opciones de stream
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <WebView
         ref={webViewRef}
-        key={channel.id}
-        source={{uri: channelUrl}}
+        key={`${channel.id}-${currentOptionIdx}`}
+        source={{uri: currentStreamUrl}}
         style={styles.webview}
         javaScriptEnabled
         domStorageEnabled
@@ -298,6 +324,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           />
           <ActivityIndicator size="large" color={Colors.accent} />
           <Text style={styles.loadingText}>Cargando {channel.name}...</Text>
+          {streamOptions.length > 1 && (
+            <Text style={styles.loadingSubtext}>
+              Opción {currentOptionIdx + 1} de {streamOptions.length}
+            </Text>
+          )}
         </View>
       )}
 
@@ -352,6 +383,11 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.lg,
     color: Colors.textPrimary,
     marginTop: Spacing.md,
+  },
+  loadingSubtext: {
+    fontSize: FontSizes.sm,
+    color: Colors.textSecondary,
+    marginTop: Spacing.sm,
   },
   errorOverlay: {
     ...StyleSheet.absoluteFillObject,

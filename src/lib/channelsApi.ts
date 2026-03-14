@@ -1,10 +1,10 @@
-import {supabase} from './supabase';
+import {scrapeChannels} from './scraper';
 import {
   Channel,
   Category,
   StreamOption,
-  channels as hardcodedChannels,
-  categories as hardcodedCategories,
+  channels as fallbackChannels,
+  categories as fallbackCategories,
 } from '@/data/channels';
 
 export interface ChannelsData {
@@ -13,42 +13,18 @@ export interface ChannelsData {
 }
 
 /**
- * Fetch channels and categories from Supabase.
- * Falls back to hardcoded data if the request fails or returns empty.
+ * Fetch channels by scraping pelisjuanita.com/tv/.
+ * Falls back to hardcoded data if scraping fails.
  */
 export async function fetchChannelsData(): Promise<ChannelsData> {
   try {
-    const {data, error} = await supabase.rpc('get_channels_with_options');
+    const data = await scrapeChannels();
 
-    if (error) {
-      console.log('Failed to fetch channels from Supabase:', error.message);
-      return getFallbackData();
+    if (data.channels.length > 0 && data.categories.length > 0) {
+      return data;
     }
 
-    const cats: Category[] = data?.categories || [];
-    const chs: Channel[] = (data?.channels || []).map((ch: any) => ({
-      id: ch.id,
-      name: ch.name,
-      category: ch.category,
-      slug: ch.slug,
-      logoUrl: ch.logoUrl || '',
-      description: ch.description || undefined,
-      isEvento: ch.isEvento || false,
-      streamOptions: (ch.streamOptions || []).map((so: any) => ({
-        id: so.id,
-        label: so.label,
-        streamUrl: so.streamUrl,
-        hasAds: so.hasAds || false,
-        priority: so.priority || 0,
-      })),
-    }));
-
-    // If Supabase returned data, use it
-    if (cats.length > 0 && chs.length > 0) {
-      return {categories: cats, channels: chs};
-    }
-
-    // Otherwise fall back to hardcoded
+    console.log('Scraper returned empty data, using fallback');
     return getFallbackData();
   } catch (err) {
     console.log('Error fetching channels:', err);
@@ -58,8 +34,8 @@ export async function fetchChannelsData(): Promise<ChannelsData> {
 
 function getFallbackData(): ChannelsData {
   return {
-    categories: hardcodedCategories,
-    channels: hardcodedChannels,
+    categories: fallbackCategories,
+    channels: fallbackChannels,
   };
 }
 
@@ -77,16 +53,13 @@ export async function validateStreamUrl(url: string): Promise<boolean> {
       signal: controller.signal,
       headers: {
         'User-Agent':
-          'Mozilla/5.0 (Linux; Android 10; BRAVIA 4K GB) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Mozilla/5.0 (Linux; Android 14; Chromecast HD) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       },
     });
 
     clearTimeout(timeout);
-
-    // Accept 2xx and 3xx as valid
     return response.status < 400;
   } catch {
-    // If HEAD fails, try GET (some servers don't support HEAD)
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
@@ -96,8 +69,8 @@ export async function validateStreamUrl(url: string): Promise<boolean> {
         signal: controller.signal,
         headers: {
           'User-Agent':
-            'Mozilla/5.0 (Linux; Android 10; BRAVIA 4K GB) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          Range: 'bytes=0-0', // minimize data transfer
+            'Mozilla/5.0 (Linux; Android 14; Chromecast HD) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+          Range: 'bytes=0-0',
         },
       });
 
@@ -111,8 +84,6 @@ export async function validateStreamUrl(url: string): Promise<boolean> {
 
 /**
  * Find the first working stream option for a channel.
- * Tests each option URL and returns the first one that responds successfully.
- * Returns null if no options work.
  */
 export async function findWorkingStream(
   channel: Channel,
@@ -129,7 +100,6 @@ export async function findWorkingStream(
     return a.priority - b.priority;
   });
 
-  // Test each option sequentially
   for (const option of sorted) {
     const works = await validateStreamUrl(option.streamUrl);
     if (works) {
