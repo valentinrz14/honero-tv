@@ -35,7 +35,7 @@ export function useLogin() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: (accessCode: string) => loginWithCode(accessCode),
+    mutationFn: loginWithCode,
     onSuccess: () => {
       qc.invalidateQueries({queryKey: authKeys.session});
       qc.invalidateQueries({queryKey: authKeys.validation});

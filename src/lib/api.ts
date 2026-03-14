@@ -78,9 +78,7 @@ export async function clearSession(): Promise<void> {
 
 // --- API endpoints ---
 
-export async function loginWithCode(
-  accessCode: string,
-): Promise<LoginResult> {
+export async function loginWithCode(accessCode: string): Promise<LoginResult> {
   const deviceId = await getDeviceId();
   const deviceName = await getDeviceName();
 
@@ -91,6 +89,8 @@ export async function loginWithCode(
   });
 
   if (error) {
+    console.log({error});
+
     throw new Error('Error de conexión. Intentá de nuevo.');
   }
 

@@ -36,6 +36,7 @@ local.properties
 
 # Environment variables
 .env
+.env.*
 .env.local
 
 # node.js
