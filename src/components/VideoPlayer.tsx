@@ -1,4 +1,4 @@
-import React, {useState, useRef, useCallback, useEffect} from 'react';
+import React, {useState, useRef, useCallback} from 'react';
 import {
   View,
   Text,
@@ -11,14 +11,14 @@ import {WebView, WebViewNavigation} from 'react-native-webview';
 import {Channel, getChannelUrl} from '@/data/channels';
 import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
 
-// Modern Chrome user agent - avoids "Dispositivo no compatible" checks
-const USER_AGENT =
-  'Mozilla/5.0 (Linux; Android 14; Chromecast HD) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-
 interface VideoPlayerProps {
   channel: Channel;
   onError?: (error: any) => void;
 }
+
+// Modern user agent to avoid "Dispositivo no compatible"
+const USER_AGENT =
+  'Mozilla/5.0 (Linux; Android 14; Chromecast HD) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 // Block ad/popup domains
 const BLOCKED_DOMAINS = [
@@ -46,17 +46,12 @@ const BLOCKED_DOMAINS = [
   'revenuehits.com',
   'popcash.net',
   'clickaine.com',
-  'pushnotifications',
-  'onesignal.com',
   'monetag.com',
-  'bidswitch.net',
-  'outbrain.com',
-  'taboola.com',
 ];
 
-// CSS to hide tvlibr3 chrome and make the iframe player fullscreen
-const FULLSCREEN_CSS = `
-  /* Hide everything except the iframe player */
+// CSS to hide tvlibr3 site chrome and make iframe fullscreen
+const INJECTED_CSS = `
+  /* Hide site chrome */
   header, footer, nav, aside,
   .channel-aside, .player-actions, .canal-wrap > h1,
   .wrap.privce, .note, .about, .watching-card,
@@ -64,10 +59,7 @@ const FULLSCREEN_CSS = `
   [class*="banner"], [class*="cookie"], [class*="popup"],
   [class*="social"], [class*="share"],
   [id*="header"], [id*="footer"], [id*="sidebar"],
-  .breadcrumb, .page-title, .channel-info-box,
-  .ads, .ad, [class*="advert"], [class*="sponsor"],
-  [id*="ad-"], [id*="ads"],
-  a[target="_blank"], .btn-close, .close-btn {
+  .breadcrumb, .page-title, .channel-info-box {
     display: none !important;
     visibility: hidden !important;
     height: 0 !important;
@@ -99,7 +91,7 @@ const FULLSCREEN_CSS = `
     display: block !important;
   }
 
-  /* Make player iframe fullscreen */
+  /* Make the player iframe fullscreen */
   iframe#iframe, iframe[name="iframe"] {
     position: fixed !important;
     top: 0 !important;
@@ -110,6 +102,7 @@ const FULLSCREEN_CSS = `
     max-height: 100vh !important;
     z-index: 99999 !important;
     border: none !important;
+    aspect-ratio: auto !important;
     margin: 0 !important;
   }
 
@@ -123,6 +116,7 @@ const FULLSCREEN_CSS = `
     height: 100vh !important;
     z-index: 99999 !important;
     border: none !important;
+    aspect-ratio: auto !important;
     margin: 0 !important;
   }
 
@@ -136,173 +130,58 @@ const FULLSCREEN_CSS = `
     z-index: 99999 !important;
     object-fit: contain !important;
   }
-
-  /* Remove blur/filter effects */
-  * {
-    -webkit-filter: none !important;
-    filter: none !important;
-  }
 `;
 
-// Single JS that: scrapes options, picks the best, clicks it, and cleans up the page
 const INJECTED_JS = `
   (function() {
     'use strict';
 
-    // Block popups and ads immediately
+    // Block popups
     window.open = function() { return null; };
     window.aclib = { runPop: function() {} };
-    window.alert = function() {};
-    window.confirm = function() { return false; };
-    window.prompt = function() { return null; };
 
-    // Inject fullscreen CSS
-    function injectCSS() {
-      var style = document.createElement('style');
-      style.id = 'hornero-css';
-      style.textContent = ${JSON.stringify(FULLSCREEN_CSS)};
-      document.head.appendChild(style);
-    }
-    injectCSS();
+    // Inject CSS
+    var style = document.createElement('style');
+    style.textContent = ${JSON.stringify(INJECTED_CSS)};
+    document.head.appendChild(style);
 
     // Remove ad scripts
-    document.querySelectorAll(
-      'script[src*="acscdn"], script[src*="sharethis"], script[src*="aclib"], ' +
-      'script[src*="popads"], script[src*="propeller"], script[src*="exoclick"], ' +
-      'script[src*="monetag"]'
-    ).forEach(function(s) { s.remove(); });
+    document.querySelectorAll('script[src*="acscdn"], script[src*="sharethis"], script[src*="aclib"]').forEach(function(s) { s.remove(); });
 
-    // Extract stream option URLs from the server-links nav
-    function extractOptions() {
-      var options = [];
-      var links = document.querySelectorAll('.server-links a, nav.server-links a');
-
-      links.forEach(function(link, index) {
-        var onclick = link.getAttribute('onclick') || '';
-        var match = onclick.match(/\\.src\\s*=\\s*'([^']+)'/) ||
-                    onclick.match(/\\.src\\s*=\\s*"([^"]+)"/);
-        if (match && match[1]) {
-          var label = (link.textContent || '').trim() || ('Opcion ' + (index + 1));
-          var hasAds = label.toLowerCase().indexOf('ads') !== -1;
-          options.push({
-            url: match[1],
-            label: label,
-            hasAds: hasAds,
-            index: index,
-            element: link
-          });
-        }
-      });
-      return options;
-    }
-
-    // Pick the best option: prefer non-ads, use first available
-    function pickBest(options) {
-      // Sort: non-ads first
-      var sorted = options.slice().sort(function(a, b) {
-        if (a.hasAds !== b.hasAds) return a.hasAds ? 1 : -1;
-        return a.index - b.index;
-      });
-      return sorted[0] || null;
-    }
-
-    // Click the best option to load it in the iframe (keeps referrer!)
-    function activateBestOption(options) {
-      var best = pickBest(options);
-      if (best && best.element) {
-        // Click the link to trigger its onclick handler
-        try { best.element.click(); } catch(e) {}
-
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'stream_activated',
-          label: best.label,
-          url: best.url
-        }));
-      } else if (best) {
-        // Fallback: set iframe src directly
-        var iframe = document.querySelector('iframe#iframe, iframe[name="iframe"]');
-        if (iframe) {
-          iframe.src = best.url;
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'stream_activated',
-            label: best.label,
-            url: best.url
-          }));
-        }
-      }
-    }
-
-    // Try to extract and activate, with retries
-    function tryActivate(attempts) {
-      var options = extractOptions();
-      if (options.length > 0) {
-        activateBestOption(options);
-        // Re-inject CSS after option click (DOM might change)
-        setTimeout(injectCSS, 500);
-        setTimeout(injectCSS, 2000);
-      } else if (attempts < 8) {
-        // Retry - page might still be loading
-        setTimeout(function() { tryActivate(attempts + 1); }, 1000);
-      } else {
-        // No options found - check if there's already an iframe playing
-        var iframe = document.querySelector('iframe#iframe, iframe[name="iframe"]');
-        if (iframe && iframe.src && iframe.src !== 'about:blank') {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'stream_activated',
-            label: 'Principal',
-            url: iframe.src
-          }));
-        } else {
-          // Nothing found - just show what we have
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'stream_activated',
-            label: '',
-            url: ''
-          }));
-        }
-      }
-    }
-
-    // Re-apply CSS on DOM changes
-    var cssApplied = false;
+    // Re-apply CSS once on dynamic changes
+    var applied = false;
     var observer = new MutationObserver(function() {
-      if (!cssApplied) {
-        cssApplied = true;
+      if (!applied) {
+        applied = true;
         setTimeout(function() {
-          injectCSS();
-          cssApplied = false;
-        }, 200);
+          var s = document.createElement('style');
+          s.textContent = ${JSON.stringify(INJECTED_CSS)};
+          document.head.appendChild(s);
+          applied = false;
+        }, 500);
       }
     });
     if (document.body) {
       observer.observe(document.body, { childList: true, subtree: true });
     }
 
-    // Auto-click play buttons after stream loads
+    // Auto-click play buttons after delay
     setTimeout(function() {
       var playBtns = document.querySelectorAll(
         '[class*="play"], button[aria-label*="play"], .vjs-big-play-button, .ytp-large-play-button'
       );
       playBtns.forEach(function(btn) { try { btn.click(); } catch(e) {} });
-    }, 4000);
+    }, 3000);
 
-    // Start extraction
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', function() { tryActivate(0); });
-    } else {
-      tryActivate(0);
-    }
+    // Notify RN that page loaded
+    window.ReactNativeWebView.postMessage(JSON.stringify({type: 'loaded'}));
   })();
   true;
 `;
 
-// JS before page loads
 const INJECTED_JS_BEFORE = `
   window.open = function() { return null; };
   window.aclib = { runPop: function() {} };
-  window.alert = function() {};
-  window.confirm = function() { return false; };
-  window.prompt = function() { return null; };
   true;
 `;
 
@@ -314,28 +193,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [httpError, setHttpError] = useState(false);
-  const [streamLabel, setStreamLabel] = useState<string>('');
   const mainUrlLoaded = useRef(false);
 
   const channelUrl = getChannelUrl(channel);
 
-  const handleMessage = useCallback((event: any) => {
-    try {
-      const data = JSON.parse(event.nativeEvent.data);
-      if (data.type === 'stream_activated') {
-        setStreamLabel(data.label || '');
-        // Give the iframe a moment to load the stream
-        setTimeout(() => setLoading(false), 2500);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
   const handleLoadEnd = useCallback(() => {
     mainUrlLoaded.current = true;
-    // Fallback: if no stream_activated message after a while, clear loading anyway
-    setTimeout(() => setLoading(false), 12000);
+    setTimeout(() => setLoading(false), 1500);
   }, []);
 
   const handleHttpError = useCallback(
@@ -347,7 +211,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const isAdUrl = BLOCKED_DOMAINS.some(d => url.includes(d));
       if (isAdUrl) return;
 
-      // Only error on main tvlibr3 page failure
       if (statusCode >= 400 && url.includes('tvlibr3.com')) {
         setHttpError(true);
         setLoading(false);
@@ -368,6 +231,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     [onError],
   );
 
+  const handleMessage = useCallback((event: any) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
+      if (data.type === 'loaded') {
+        setLoading(false);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const handleShouldStartLoad = useCallback((event: WebViewNavigation) => {
     const {url} = event;
     const isBlocked = BLOCKED_DOMAINS.some(d => url.includes(d));
@@ -380,7 +254,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setError(false);
     setHttpError(false);
     setLoading(true);
-    setStreamLabel('');
     mainUrlLoaded.current = false;
     webViewRef.current?.reload();
   }, []);
@@ -417,21 +290,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       />
 
       {/* Loading overlay */}
-      {loading && !showError && (
+      {loading && (
         <View style={styles.loadingOverlay}>
           <Image
             source={require('@/assets/hornero-icon.png')}
             style={styles.loadingIcon}
           />
           <ActivityIndicator size="large" color={Colors.accent} />
-          <Text style={styles.loadingText}>
-            Cargando {channel.name}...
-          </Text>
-          {streamLabel ? (
-            <Text style={styles.loadingSubtext}>{streamLabel}</Text>
-          ) : (
-            <Text style={styles.loadingSubtext}>Buscando mejor señal...</Text>
-          )}
+          <Text style={styles.loadingText}>Cargando {channel.name}...</Text>
         </View>
       )}
 
@@ -454,9 +320,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         <View style={styles.channelBadge}>
           <View style={styles.liveDot} />
           <Text style={styles.channelBadgeText}>{channel.name}</Text>
-          {streamLabel ? (
-            <Text style={styles.streamLabelText}> - {streamLabel}</Text>
-          ) : null}
         </View>
       )}
     </View>
@@ -489,12 +352,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.lg,
     color: Colors.textPrimary,
     marginTop: Spacing.md,
-    textAlign: 'center',
-  },
-  loadingSubtext: {
-    fontSize: FontSizes.md,
-    color: Colors.textSecondary,
-    marginTop: Spacing.sm,
   },
   errorOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -552,9 +409,5 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.sm,
     color: Colors.white,
     fontWeight: '600',
-  },
-  streamLabelText: {
-    fontSize: FontSizes.xs,
-    color: Colors.textSecondary,
   },
 });
