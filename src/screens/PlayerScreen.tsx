@@ -1,7 +1,7 @@
-import React, {useState, useCallback, useEffect} from 'react';
+import React, {useState, useCallback, useEffect, useRef} from 'react';
 import {View, StyleSheet, BackHandler, useTVEventHandler} from 'react-native';
 import {useRoute, useNavigation, RouteProp} from '@react-navigation/native';
-import {VideoPlayer} from '@/components/VideoPlayer';
+import {VideoPlayer, VideoPlayerHandle} from '@/components/VideoPlayer';
 import {ChannelSidebar} from '@/components/ChannelSidebar';
 import {Channel} from '@/data/channels';
 import {useChannels} from '@/hooks/useChannels';
@@ -15,6 +15,7 @@ export const PlayerScreen: React.FC = () => {
   const route = useRoute<PlayerRouteProp>();
   const navigation = useNavigation();
   const allChannels = useChannels();
+  const playerRef = useRef<VideoPlayerHandle>(null);
   const [currentChannelId, setCurrentChannelId] = useState(
     route.params.channelId,
   );
@@ -34,10 +35,21 @@ export const PlayerScreen: React.FC = () => {
     return () => handler.remove();
   }, [sidebarVisible]);
 
-  // Handle TV remote: left key opens sidebar
+  // Handle TV remote: left opens sidebar, select/play toggles play/pause
   useTVEventHandler(evt => {
-    if (evt && evt.eventType === 'left' && !sidebarVisible) {
+    if (!evt) return;
+    const type = evt.eventType;
+
+    if (type === 'left' && !sidebarVisible) {
       setSidebarVisible(true);
+      return;
+    }
+
+    // Only handle media controls when sidebar is closed
+    if (sidebarVisible) return;
+
+    if (type === 'select' || type === 'playPause') {
+      playerRef.current?.togglePlayPause();
     }
   });
 
@@ -64,7 +76,7 @@ export const PlayerScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <VideoPlayer channel={currentChannel} />
+      <VideoPlayer ref={playerRef} channel={currentChannel} />
 
       <ChannelSidebar
         currentChannelId={currentChannelId}

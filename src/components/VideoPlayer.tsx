@@ -1,4 +1,10 @@
-import React, {useState, useRef, useCallback} from 'react';
+import React, {
+  useState,
+  useRef,
+  useCallback,
+  useImperativeHandle,
+  forwardRef,
+} from 'react';
 import {
   View,
   Text,
@@ -11,6 +17,12 @@ import {WebView, WebViewNavigation} from 'react-native-webview';
 import {Channel} from '@/data/channels';
 import {PELISJUANITA_URL} from '@/lib/scraper';
 import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
+
+export interface VideoPlayerHandle {
+  togglePlayPause: () => void;
+  volumeUp: () => void;
+  volumeDown: () => void;
+}
 
 interface VideoPlayerProps {
   channel: Channel;
@@ -253,14 +265,84 @@ const INJECTED_JS_BEFORE = `
   true;
 `;
 
-export const VideoPlayer: React.FC<VideoPlayerProps> = ({
-  channel,
-  onError,
-}) => {
+// JS to inject for play/pause toggle - tries multiple approaches
+const TOGGLE_PLAY_PAUSE_JS = `
+(function() {
+  // Try 1: Find video element on the page
+  var video = document.querySelector('video');
+  if (video) {
+    if (video.paused) { video.play(); } else { video.pause(); }
+    return;
+  }
+  // Try 2: Send spacebar keypress to the focused element / iframe
+  var iframe = document.querySelector('iframe');
+  if (iframe) {
+    // Click center of iframe to toggle (works for most players)
+    try {
+      var rect = iframe.getBoundingClientRect();
+      var evt = new MouseEvent('click', {
+        bubbles: true, cancelable: true,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2
+      });
+      iframe.dispatchEvent(evt);
+    } catch(e) {}
+    // Also try postMessage for YouTube
+    try {
+      iframe.contentWindow.postMessage(
+        JSON.stringify({event: 'command', func: 'pauseVideo'}),
+        '*'
+      );
+    } catch(e) {}
+  }
+})();
+true;
+`;
+
+// JS to inject for volume change
+function buildVolumeJS(delta: number): string {
+  return `
+(function() {
+  var video = document.querySelector('video');
+  if (video) {
+    video.volume = Math.max(0, Math.min(1, video.volume + ${delta}));
+    return;
+  }
+  // Try YouTube iframe API
+  var iframe = document.querySelector('iframe');
+  if (iframe) {
+    try {
+      iframe.contentWindow.postMessage(
+        JSON.stringify({event: 'command', func: '${delta > 0 ? 'setVolume' : 'setVolume'}', args: [${delta > 0 ? 80 : 40}]}),
+        '*'
+      );
+    } catch(e) {}
+  }
+})();
+true;
+`;
+}
+
+const VideoPlayerInner: React.ForwardRefRenderFunction<
+  VideoPlayerHandle,
+  VideoPlayerProps
+> = ({channel, onError}, ref) => {
   const webViewRef = useRef<WebView>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const readyRef = useRef(false);
+
+  useImperativeHandle(ref, () => ({
+    togglePlayPause: () => {
+      webViewRef.current?.injectJavaScript(TOGGLE_PLAY_PAUSE_JS);
+    },
+    volumeUp: () => {
+      webViewRef.current?.injectJavaScript(buildVolumeJS(0.1));
+    },
+    volumeDown: () => {
+      webViewRef.current?.injectJavaScript(buildVolumeJS(-0.1));
+    },
+  }));
 
   const handleLoadEnd = useCallback(() => {
     // Page loaded - the injected JS will call cambiarOpcion and send 'playing' message
@@ -391,6 +473,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     </View>
   );
 };
+
+export const VideoPlayer = forwardRef(VideoPlayerInner);
 
 const styles = StyleSheet.create({
   container: {
