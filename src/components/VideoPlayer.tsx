@@ -353,13 +353,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [streamLabel, setStreamLabel] = useState<string>('');
   const mainUrlLoaded = useRef(false);
+  const phaseRef = useRef<Phase>('scraping');
   const channelIdRef = useRef(channel.id);
+
+  // Keep ref in sync with state
+  phaseRef.current = phase;
 
   // Reset state when channel changes
   useEffect(() => {
     if (channelIdRef.current !== channel.id) {
       channelIdRef.current = channel.id;
       setPhase('scraping');
+      phaseRef.current = 'scraping';
       setLoading(true);
       setError(false);
       setHttpError(false);
@@ -374,7 +379,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   useEffect(() => {
     const options = channel.streamOptions || [];
     if (options.length > 0) {
-      // Sort: non-ads first, then by priority
       const sorted = [...options].sort((a, b) => {
         if (a.hasAds !== b.hasAds) return a.hasAds ? 1 : -1;
         return a.priority - b.priority;
@@ -385,21 +389,35 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [channel]);
 
+  // Timeout fallback: if scraping takes too long, play tvlibr3 page directly
+  useEffect(() => {
+    if (phase !== 'scraping') return;
+    const timer = setTimeout(() => {
+      if (phaseRef.current === 'scraping') {
+        console.log('Scraping timeout - falling back to tvlibr3 page');
+        setPhase('playing');
+        setStreamUrl(null);
+        setStreamLabel('');
+      }
+    }, 15000);
+    return () => clearTimeout(timer);
+  }, [phase, channel.id]);
+
   const tvlibr3Url = getChannelUrl(channel);
 
-  // Handle messages from injected JS
+  // Handle messages from injected JS (use refs to avoid stale closures)
   const handleMessage = useCallback(
     (event: any) => {
       try {
         const data = JSON.parse(event.nativeEvent.data);
 
-        if (data.type === 'stream_options' && phase === 'scraping') {
+        if (data.type === 'stream_options' && phaseRef.current === 'scraping') {
           const options: ScrapedOption[] = data.options || [];
 
           if (options.length === 0) {
             // No options found - play the tvlibr3 page as-is
             setPhase('playing');
-            setStreamUrl(null); // will use tvlibr3Url
+            setStreamUrl(null);
             setStreamLabel('');
             return;
           }
@@ -417,32 +435,32 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             if (working) {
               setStreamUrl(working.url);
               setStreamLabel(working.label);
-              setPhase('playing');
             } else {
-              // None worked - fall back to first option anyway
+              // None responded to HEAD/GET - use first option anyway
+              // (stream providers often block direct fetch but work in WebView)
               setStreamUrl(sorted[0].url);
               setStreamLabel(sorted[0].label);
-              setPhase('playing');
             }
+            setPhase('playing');
           });
         }
 
-        if (data.type === 'loaded' && phase === 'playing') {
+        if (data.type === 'loaded' && phaseRef.current === 'playing') {
           setLoading(false);
         }
       } catch {
         // ignore
       }
     },
-    [phase],
+    [],
   );
 
   const handleLoadEnd = useCallback(() => {
     mainUrlLoaded.current = true;
-    if (phase === 'playing') {
+    if (phaseRef.current === 'playing') {
       setTimeout(() => setLoading(false), 1500);
     }
-  }, [phase]);
+  }, []);
 
   const handleHttpError = useCallback(
     (syntheticEvent: any) => {
@@ -450,7 +468,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const statusCode = nativeEvent?.statusCode;
       const url = nativeEvent?.url || '';
 
-      if (phase === 'scraping') return; // Ignore errors during scraping
+      if (phaseRef.current === 'scraping') return;
 
       const isAdUrl = BLOCKED_DOMAINS.some(d => url.includes(d));
       if (isAdUrl) return;
@@ -461,19 +479,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onError?.(nativeEvent);
       }
     },
-    [onError, phase],
+    [onError],
   );
 
   const handleError = useCallback(
     (syntheticEvent: any) => {
-      if (phase === 'scraping') return;
+      if (phaseRef.current === 'scraping') return;
       if (!mainUrlLoaded.current) {
         setError(true);
         setLoading(false);
         onError?.(syntheticEvent.nativeEvent);
       }
     },
-    [onError, phase],
+    [onError],
   );
 
   const handleShouldStartLoad = useCallback(
@@ -502,7 +520,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Determine what URL and JS to use based on phase
   const currentUrl = phase === 'scraping' ? tvlibr3Url : (streamUrl || tvlibr3Url);
   const currentJS = phase === 'scraping' ? SCRAPER_JS : STREAM_JS;
-  const currentJSBefore = phase === 'scraping' ? STREAM_JS_BEFORE : STREAM_JS_BEFORE;
 
   return (
     <View style={styles.container}>
@@ -510,14 +527,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         ref={webViewRef}
         key={`${channel.id}-${phase}-${streamUrl || 'default'}`}
         source={{uri: currentUrl}}
-        style={phase === 'scraping' ? styles.hiddenWebview : styles.webview}
+        style={styles.webview}
         javaScriptEnabled
         domStorageEnabled
         javaScriptCanOpenWindowsAutomatically={false}
         mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback
         injectedJavaScript={currentJS}
-        injectedJavaScriptBeforeContentLoaded={currentJSBefore}
+        injectedJavaScriptBeforeContentLoaded={STREAM_JS_BEFORE}
         onLoadEnd={handleLoadEnd}
         onError={handleError}
         onHttpError={handleHttpError}
@@ -632,11 +649,6 @@ const styles = StyleSheet.create({
   webview: {
     flex: 1,
     backgroundColor: Colors.black,
-  },
-  hiddenWebview: {
-    width: 0,
-    height: 0,
-    opacity: 0,
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
