@@ -65,7 +65,32 @@ export async function scrapeChannels(): Promise<{
       throw new Error(`HTTP ${response.status}`);
     }
 
-    const html = await response.text();
+    // React Native fetch sometimes returns blob instead of text
+    // Use blob + FileReader as a reliable way to get the string
+    let html: string;
+    try {
+      const blob = await response.blob();
+      html = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === 'string') {
+            resolve(reader.result);
+          } else {
+            reject(new Error('FileReader did not return string'));
+          }
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(blob);
+      });
+    } catch {
+      // Fallback to .text() in case blob approach fails
+      html = await response.text();
+    }
+
+    if (typeof html !== 'string' || html.length < 100) {
+      throw new Error('Invalid HTML response');
+    }
+
     return parseChannelsFromHTML(html);
   } catch (err) {
     clearTimeout(timeout);
