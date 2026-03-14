@@ -187,15 +187,24 @@ function buildInjectedJS(channel: Channel): string {
   }
 
   function applyFullscreen() {
-    // Wait a bit for the iframe to be created, then apply CSS
+    // Apply CSS immediately
+    var style = document.createElement('style');
+    style.textContent = ${JSON.stringify(FULLSCREEN_CSS)};
+    document.head.appendChild(style);
+    removeAds();
+
+    // Wait for the iframe/player to be created, then make body visible and notify RN
     setTimeout(function() {
-      var style = document.createElement('style');
-      style.textContent = ${JSON.stringify(FULLSCREEN_CSS)};
-      document.head.appendChild(style);
+      // Re-apply CSS to catch any dynamic elements
+      var s2 = document.createElement('style');
+      s2.textContent = ${JSON.stringify(FULLSCREEN_CSS)};
+      document.head.appendChild(s2);
+      // Now make body visible - only the player iframe should be showing
+      document.body.style.visibility = 'visible';
       removeAds();
 
       window.ReactNativeWebView.postMessage(JSON.stringify({type: 'playing'}));
-    }, 1000);
+    }, 1500);
 
     // Re-apply CSS on dynamic changes
     var applied = false;
@@ -237,8 +246,17 @@ true;
 `;
 }
 
+// JS that runs BEFORE page content loads - hides everything immediately
 const INJECTED_JS_BEFORE = `
   window.open = function() { return null; };
+  // Hide body immediately so the page is never visible
+  document.addEventListener('DOMContentLoaded', function() {
+    document.body.style.cssText = 'background:#000!important;visibility:hidden!important;';
+  });
+  // Also try to hide via documentElement for even earlier effect
+  if (document.documentElement) {
+    document.documentElement.style.cssText = 'background:#000!important;';
+  }
   true;
 `;
 
@@ -301,7 +319,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         ref={webViewRef}
         key={channel.id}
         source={{uri: PELISJUANITA_URL}}
-        style={styles.webview}
+        style={[styles.webview, loading && styles.webviewHidden]}
         javaScriptEnabled
         domStorageEnabled
         javaScriptCanOpenWindowsAutomatically={false}
@@ -321,6 +339,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         cacheEnabled
         originWhitelist={['*']}
         userAgent={USER_AGENT}
+        focusable={false}
+        tabIndex={-1}
       />
 
       {/* Loading overlay */}
@@ -369,6 +389,9 @@ const styles = StyleSheet.create({
   webview: {
     flex: 1,
     backgroundColor: Colors.black,
+  },
+  webviewHidden: {
+    opacity: 0,
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,

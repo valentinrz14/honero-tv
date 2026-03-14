@@ -1,5 +1,5 @@
 import React, {useState, useCallback, useEffect} from 'react';
-import {View, StyleSheet, BackHandler} from 'react-native';
+import {View, StyleSheet, BackHandler, useTVEventHandler} from 'react-native';
 import {useRoute, useNavigation, RouteProp} from '@react-navigation/native';
 import {VideoPlayer} from '@/components/VideoPlayer';
 import {ChannelSidebar} from '@/components/ChannelSidebar';
@@ -33,6 +33,13 @@ export const PlayerScreen: React.FC = () => {
     });
     return () => handler.remove();
   }, [sidebarVisible]);
+
+  // Handle TV remote: left key opens sidebar
+  useTVEventHandler(evt => {
+    if (evt && evt.eventType === 'left' && !sidebarVisible) {
+      setSidebarVisible(true);
+    }
+  });
 
   const handleSidebarToggle = useCallback(() => {
     setSidebarVisible(prev => !prev);
