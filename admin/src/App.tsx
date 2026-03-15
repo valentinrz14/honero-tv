@@ -26,7 +26,7 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<DashboardPage onLogout={handleLogout} />} />
-      <Route path="/user/:userId" element={<UserDetailPage onLogout={handleLogout} />} />
+      <Route path="/user/:userId" element={<UserDetailPage />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
