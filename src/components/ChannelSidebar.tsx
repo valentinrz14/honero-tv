@@ -1,4 +1,4 @@
-import React, {useState, useCallback, useRef} from 'react';
+import React, {useState} from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   SectionList,
-  Animated,
 } from 'react-native';
 import {Channel} from '@/data/channels';
 import {useChannels, useCategories} from '@/hooks/useChannels';
@@ -30,16 +29,6 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
   onChannelSelect,
   visible,
 }) => {
-  const slideAnim = useRef(new Animated.Value(visible ? 0 : -320)).current;
-
-  React.useEffect(() => {
-    Animated.timing(slideAnim, {
-      toValue: visible ? 0 : -320,
-      duration: 250,
-      useNativeDriver: true,
-    }).start();
-  }, [visible, slideAnim]);
-
   const allChannels = useChannels();
   const allCategories = useCategories();
 
@@ -68,8 +57,7 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
   );
 
   return (
-    <Animated.View
-      style={[styles.container, {transform: [{translateX: slideAnim}]}]}>
+    <View style={styles.container}>
       <View style={styles.header}>
         <Image source={require('@/assets/hornero-icon.png')} style={styles.headerIcon} />
         <Text style={styles.headerTitle}>Canales</Text>
@@ -83,7 +71,7 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
         stickySectionHeadersEnabled={false}
         removeClippedSubviews
       />
-    </Animated.View>
+    </View>
   );
 };
 
@@ -122,13 +110,8 @@ const SidebarItem: React.FC<{
 
 const styles = StyleSheet.create({
   container: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 300,
+    flex: 1,
     backgroundColor: Colors.overlay,
-    zIndex: 50,
     paddingTop: Spacing.lg,
   },
   header: {

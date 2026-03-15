@@ -1,12 +1,20 @@
 import React, {useState, useCallback, useEffect, useRef} from 'react';
-import {View, StyleSheet, BackHandler, useTVEventHandler} from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  BackHandler,
+  useTVEventHandler,
+  Animated,
+  TouchableOpacity,
+} from 'react-native';
 import {useRoute, useNavigation, RouteProp} from '@react-navigation/native';
 import {VideoPlayer, VideoPlayerHandle} from '@/components/VideoPlayer';
 import {ChannelSidebar} from '@/components/ChannelSidebar';
 import {Channel} from '@/data/channels';
 import {useChannels} from '@/hooks/useChannels';
 import {addRecentChannel} from '@/utils/storage';
-import {Colors} from '@/theme/colors';
+import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
 import {RootStackParamList} from '@/navigation/AppNavigator';
 
 type PlayerRouteProp = RouteProp<RootStackParamList, 'Player'>;
@@ -19,51 +27,96 @@ export const PlayerScreen: React.FC = () => {
   const [currentChannelId, setCurrentChannelId] = useState(
     route.params.channelId,
   );
-  const [sidebarVisible, setSidebarVisible] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const overlayOpacity = useRef(new Animated.Value(0)).current;
+  const sidebarSlide = useRef(new Animated.Value(-320)).current;
 
   const currentChannel = allChannels.find(ch => ch.id === currentChannelId);
 
-  // Handle back button: toggle sidebar or go back
+  // Animate overlay in/out when paused state changes
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(overlayOpacity, {
+        toValue: paused ? 1 : 0,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.timing(sidebarSlide, {
+        toValue: paused ? 0 : -320,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [paused, overlayOpacity, sidebarSlide]);
+
+  const doPause = useCallback(() => {
+    if (!paused) {
+      playerRef.current?.togglePlayPause();
+      setPaused(true);
+    }
+  }, [paused]);
+
+  const doResume = useCallback(() => {
+    if (paused) {
+      playerRef.current?.togglePlayPause();
+      setPaused(false);
+    }
+  }, [paused]);
+
+  const togglePlayPause = useCallback(() => {
+    if (paused) {
+      doResume();
+    } else {
+      doPause();
+    }
+  }, [paused, doPause, doResume]);
+
+  // Handle back button: if paused/overlay visible, resume; else go back
   useEffect(() => {
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (sidebarVisible) {
-        setSidebarVisible(false);
+      if (paused) {
+        doResume();
         return true;
       }
       return false;
     });
     return () => handler.remove();
-  }, [sidebarVisible]);
+  }, [paused, doResume]);
 
-  // Handle TV remote: left opens sidebar, select/play toggles play/pause
+  // Handle TV remote events
   useTVEventHandler(evt => {
     if (!evt) return;
     const type = evt.eventType;
 
-    if (type === 'left' && !sidebarVisible) {
-      setSidebarVisible(true);
+    // DOWN → pause and show overlay
+    if (type === 'down' && !paused) {
+      doPause();
       return;
     }
 
-    // Only handle media controls when sidebar is closed
-    if (sidebarVisible) return;
-
+    // SELECT or PLAY/PAUSE → toggle
     if (type === 'select' || type === 'playPause') {
-      playerRef.current?.togglePlayPause();
+      togglePlayPause();
+      return;
+    }
+
+    // LEFT → open sidebar (pause if not paused)
+    if (type === 'left' && !paused) {
+      doPause();
+      return;
     }
   });
 
-  const handleSidebarToggle = useCallback(() => {
-    setSidebarVisible(prev => !prev);
-  }, []);
+  const handleChannelSelect = useCallback(
+    async (channel: Channel) => {
+      setCurrentChannelId(channel.id);
+      setPaused(false);
+      await addRecentChannel(channel.id);
+    },
+    [],
+  );
 
-  const handleChannelSelect = useCallback(async (channel: Channel) => {
-    setCurrentChannelId(channel.id);
-    setSidebarVisible(false);
-    await addRecentChannel(channel.id);
-  }, []);
-
-  // Navigate back if channel not found (in useEffect to avoid setState during render)
+  // Navigate back if channel not found
   useEffect(() => {
     if (!currentChannel) {
       navigation.goBack();
@@ -78,19 +131,38 @@ export const PlayerScreen: React.FC = () => {
     <View style={styles.container}>
       <VideoPlayer ref={playerRef} channel={currentChannel} />
 
-      <ChannelSidebar
-        currentChannelId={currentChannelId}
-        onChannelSelect={handleChannelSelect}
-        visible={sidebarVisible}
-      />
+      {/* Dark overlay + sidebar + play button when paused */}
+      <Animated.View
+        style={[styles.overlay, {opacity: overlayOpacity}]}
+        pointerEvents={paused ? 'auto' : 'none'}>
+        {/* Sidebar on the left */}
+        <Animated.View
+          style={[
+            styles.sidebarContainer,
+            {transform: [{translateX: sidebarSlide}]},
+          ]}>
+          <ChannelSidebar
+            currentChannelId={currentChannelId}
+            onChannelSelect={handleChannelSelect}
+            visible={paused}
+          />
+        </Animated.View>
 
-      <View
-        style={styles.sidebarTrigger}
-        onTouchStart={handleSidebarToggle}
-        accessible
-        accessibilityLabel="Abrir lista de canales"
-        accessibilityRole="button"
-      />
+        {/* Play button in center-right area */}
+        <View style={styles.playButtonArea}>
+          <TouchableOpacity
+            style={styles.playButton}
+            onPress={doResume}
+            activeOpacity={0.7}
+            hasTVPreferredFocus={paused}>
+            <View style={styles.playIconContainer}>
+              <Text style={styles.playIcon}>▶</Text>
+            </View>
+            <Text style={styles.playLabel}>{currentChannel.name}</Text>
+            <Text style={styles.pausedLabel}>En pausa</Text>
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
     </View>
   );
 };
@@ -100,12 +172,49 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.black,
   },
-  sidebarTrigger: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 40,
-    zIndex: 10,
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    flexDirection: 'row',
+    zIndex: 50,
+  },
+  sidebarContainer: {
+    width: 300,
+    height: '100%',
+  },
+  playButtonArea: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playButton: {
+    alignItems: 'center',
+    padding: Spacing.xl,
+    borderRadius: BorderRadius.xl,
+    backgroundColor: 'rgba(26, 18, 16, 0.6)',
+  },
+  playIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: Colors.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  playIcon: {
+    fontSize: 36,
+    color: Colors.white,
+    marginLeft: 4,
+  },
+  playLabel: {
+    fontSize: FontSizes.xl,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+    marginBottom: Spacing.xs,
+  },
+  pausedLabel: {
+    fontSize: FontSizes.md,
+    color: Colors.textSecondary,
   },
 });
