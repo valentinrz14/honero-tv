@@ -93,7 +93,7 @@ export const HomeScreen: React.FC = () => {
         </View>
         <FlatList
           horizontal
-          data={allChannels.slice(0, 6)}
+          data={featuredChannels}
           keyExtractor={item => `featured-${item.id}`}
           renderItem={({item}) => (
             <ChannelCard
@@ -110,10 +110,19 @@ export const HomeScreen: React.FC = () => {
     </View>
   );
 
-  const categoryData = allCategories.map(cat => ({
-    category: cat,
-    channels: allChannels.filter(ch => ch.category === cat.id),
-  }));
+  const categoryData = useMemo(
+    () =>
+      allCategories.map(cat => ({
+        category: cat,
+        channels: allChannels.filter(ch => ch.category === cat.id),
+      })),
+    [allCategories, allChannels],
+  );
+
+  const featuredChannels = useMemo(
+    () => allChannels.slice(0, 6),
+    [allChannels],
+  );
 
   if (isLoadingChannels && allChannels.length === 0) {
     return (

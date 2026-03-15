@@ -1,4 +1,4 @@
-import React, {useState, useCallback} from 'react';
+import React, {useState, useCallback, useRef, useEffect} from 'react';
 import {
   View,
   TextInput,
@@ -11,6 +11,15 @@ import {Channel} from '@/data/channels';
 import {useSearchChannels} from '@/hooks/useChannels';
 import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
 
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
 interface SearchBarProps {
   onChannelSelect: (channel: Channel) => void;
 }
@@ -18,7 +27,8 @@ interface SearchBarProps {
 export const SearchBar: React.FC<SearchBarProps> = ({onChannelSelect}) => {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
-  const results = useSearchChannels(query);
+  const debouncedQuery = useDebouncedValue(query, 300);
+  const results = useSearchChannels(debouncedQuery);
 
   const handleSearch = useCallback((text: string) => {
     setQuery(text);

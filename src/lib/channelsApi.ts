@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {scrapeChannels} from './scraper';
 import {
   Channel,
@@ -12,12 +13,54 @@ export interface ChannelsData {
   channels: Channel[];
 }
 
+const CHANNELS_CACHE_KEY = 'channels_cache';
+const CHANNELS_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
+interface CachedChannelsData {
+  data: ChannelsData;
+  timestamp: number;
+}
+
+async function getCachedChannels(): Promise<ChannelsData | null> {
+  try {
+    const raw = await AsyncStorage.getItem(CHANNELS_CACHE_KEY);
+    if (!raw) return null;
+    const cached: CachedChannelsData = JSON.parse(raw);
+    if (Date.now() - cached.timestamp < CHANNELS_CACHE_TTL) {
+      return cached.data;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function setCachedChannels(data: ChannelsData): Promise<void> {
+  try {
+    const cached: CachedChannelsData = {data, timestamp: Date.now()};
+    await AsyncStorage.setItem(CHANNELS_CACHE_KEY, JSON.stringify(cached));
+  } catch {}
+}
+
 /**
  * Fetch channels by triggering a WebView scrape of pelisjuanita.com/tv/.
- * The ScraperWebView component must be mounted for this to work.
- * Falls back to empty data if scraping fails (will retry via React Query).
+ * Uses persistent AsyncStorage cache to avoid re-scraping on cold starts.
+ * Falls back to cached/fallback data if scraping fails.
  */
 export async function fetchChannelsData(): Promise<ChannelsData> {
+  // Try persistent cache first (instant cold start)
+  const cached = await getCachedChannels();
+  if (cached && cached.channels.length > 0) {
+    console.log(`fetchChannelsData: using cached data (${cached.channels.length} channels)`);
+    // Trigger background refresh but return cached immediately
+    refreshChannelsInBackground();
+    return cached;
+  }
+
+  return await scrapeAndCache();
+}
+
+async function scrapeAndCache(): Promise<ChannelsData> {
   try {
     console.log('fetchChannelsData: starting WebView scrape...');
     const data = await scrapeChannels();
@@ -26,6 +69,7 @@ export async function fetchChannelsData(): Promise<ChannelsData> {
       console.log(
         `fetchChannelsData: success - ${data.channels.length} channels`,
       );
+      await setCachedChannels(data);
       return data;
     }
 
@@ -34,6 +78,17 @@ export async function fetchChannelsData(): Promise<ChannelsData> {
   } catch (err) {
     console.log('Error fetching channels:', err);
     return getFallbackData();
+  }
+}
+
+let _backgroundRefreshInProgress = false;
+async function refreshChannelsInBackground(): Promise<void> {
+  if (_backgroundRefreshInProgress) return;
+  _backgroundRefreshInProgress = true;
+  try {
+    await scrapeAndCache();
+  } finally {
+    _backgroundRefreshInProgress = false;
   }
 }
 
@@ -50,7 +105,7 @@ function getFallbackData(): ChannelsData {
 export async function validateStreamUrl(url: string): Promise<boolean> {
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+    const timeout = setTimeout(() => controller.abort(), 5000);
 
     const response = await fetch(url, {
       method: 'HEAD',
@@ -66,7 +121,7 @@ export async function validateStreamUrl(url: string): Promise<boolean> {
   } catch {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
+      const timeout = setTimeout(() => controller.abort(), 5000);
 
       const response = await fetch(url, {
         method: 'GET',
@@ -88,6 +143,7 @@ export async function validateStreamUrl(url: string): Promise<boolean> {
 
 /**
  * Find the first working stream option for a channel.
+ * Validates streams in parallel for faster results.
  */
 export async function findWorkingStream(
   channel: Channel,
@@ -103,12 +159,14 @@ export async function findWorkingStream(
     return a.priority - b.priority;
   });
 
-  for (const option of sorted) {
-    const works = await validateStreamUrl(option.streamUrl);
-    if (works) {
-      return option;
-    }
-  }
+  // Validate all streams in parallel, return the first working one by priority
+  const results = await Promise.all(
+    sorted.map(async option => ({
+      option,
+      works: await validateStreamUrl(option.streamUrl),
+    })),
+  );
 
-  return null;
+  const working = results.find(r => r.works);
+  return working?.option ?? null;
 }

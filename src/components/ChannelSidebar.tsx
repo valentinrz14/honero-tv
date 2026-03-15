@@ -1,4 +1,4 @@
-import React, {useState, useRef, useEffect, useCallback} from 'react';
+import React, {useState, useMemo, useRef, useEffect, useCallback} from 'react';
 import {
   View,
   Text,
@@ -33,14 +33,18 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
   const allCategories = useCategories();
   const listRef = useRef<SectionList<Channel, SectionData>>(null);
 
-  const sections: SectionData[] = allCategories
-    .map(cat => ({
-      title: cat.name,
-      color: cat.color,
-      icon: cat.icon,
-      data: allChannels.filter(ch => ch.category === cat.id),
-    }))
-    .filter(s => s.data.length > 0);
+  const sections: SectionData[] = useMemo(
+    () =>
+      allCategories
+        .map(cat => ({
+          title: cat.name,
+          color: cat.color,
+          icon: cat.icon,
+          data: allChannels.filter(ch => ch.category === cat.id),
+        }))
+        .filter(s => s.data.length > 0),
+    [allCategories, allChannels],
+  );
 
   // Scroll to the active channel when the sidebar becomes visible
   useEffect(() => {
@@ -99,7 +103,16 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
         renderItem={renderItem}
         showsVerticalScrollIndicator={false}
         stickySectionHeadersEnabled={false}
-        removeClippedSubviews={false}
+        removeClippedSubviews
+        initialNumToRender={15}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        updateCellsBatchingPeriod={50}
+        getItemLayout={(data, index) => ({
+          length: 48,
+          offset: 48 * index,
+          index,
+        })}
       />
     </View>
   );
