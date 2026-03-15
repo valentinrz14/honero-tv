@@ -2,11 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase, daysRemaining, expiryStatus, type User, type Device } from '../lib/supabase';
 
-interface UserDetailProps {
-  onLogout: () => void;
-}
-
-export function UserDetailPage({ onLogout }: UserDetailProps) {
+export function UserDetailPage() {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
