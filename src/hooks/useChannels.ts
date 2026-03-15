@@ -1,3 +1,4 @@
+import {useMemo} from 'react';
 import {useQuery} from '@tanstack/react-query';
 import {fetchChannelsData, ChannelsData} from '@/lib/channelsApi';
 import {
@@ -30,24 +31,32 @@ export function useCategories(): Category[] {
 
 export function useChannelById(channelId: string): Channel | undefined {
   const channels = useChannels();
-  return channels.find(ch => ch.id === channelId);
+  return useMemo(
+    () => channels.find(ch => ch.id === channelId),
+    [channels, channelId],
+  );
 }
 
 export function useChannelsByCategory(categoryId: string): Channel[] {
   const channels = useChannels();
-  return channels.filter(ch => ch.category === categoryId);
+  return useMemo(
+    () => channels.filter(ch => ch.category === categoryId),
+    [channels, categoryId],
+  );
 }
 
 export function useSearchChannels(query: string): Channel[] {
   const channels = useChannels();
-  if (query.length < 2) return [];
-  const lower = query.toLowerCase();
-  return channels.filter(
-    ch =>
-      ch.name.toLowerCase().includes(lower) ||
-      ch.category.toLowerCase().includes(lower) ||
-      (ch.country && ch.country.toLowerCase().includes(lower)),
-  );
+  return useMemo(() => {
+    if (query.length < 2) return [];
+    const lower = query.toLowerCase();
+    return channels.filter(
+      ch =>
+        ch.name.toLowerCase().includes(lower) ||
+        ch.category.toLowerCase().includes(lower) ||
+        (ch.country && ch.country.toLowerCase().includes(lower)),
+    );
+  }, [channels, query]);
 }
 
 export function useChannelsLoading(): boolean {
