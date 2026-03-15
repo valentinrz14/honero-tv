@@ -154,7 +154,7 @@ export const PlayerScreen: React.FC = () => {
             style={styles.playButton}
             onPress={doResume}
             activeOpacity={0.7}
-            hasTVPreferredFocus={paused}>
+            hasTVPreferredFocus={false}>
             <View style={styles.playIconContainer}>
               <Text style={styles.playIcon}>▶</Text>
             </View>

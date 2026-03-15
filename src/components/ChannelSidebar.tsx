@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useState, useRef, useEffect, useCallback} from 'react';
 import {
   View,
   Text,
@@ -31,6 +31,7 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
 }) => {
   const allChannels = useChannels();
   const allCategories = useCategories();
+  const listRef = useRef<SectionList<Channel, SectionData>>(null);
 
   const sections: SectionData[] = allCategories
     .map(cat => ({
@@ -40,6 +41,33 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
       data: allChannels.filter(ch => ch.category === cat.id),
     }))
     .filter(s => s.data.length > 0);
+
+  // Scroll to the active channel when the sidebar becomes visible
+  useEffect(() => {
+    if (!visible) return;
+    // Find section and item indices for the current channel
+    for (let sIdx = 0; sIdx < sections.length; sIdx++) {
+      const iIdx = sections[sIdx].data.findIndex(
+        ch => ch.id === currentChannelId,
+      );
+      if (iIdx !== -1) {
+        // Small delay to ensure list is rendered before scrolling
+        const timer = setTimeout(() => {
+          try {
+            listRef.current?.scrollToLocation({
+              sectionIndex: sIdx,
+              itemIndex: iIdx,
+              viewOffset: 100,
+              animated: true,
+            });
+          } catch (_) {
+            // Ignore scroll errors (e.g. if list not mounted yet)
+          }
+        }, 100);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [visible, currentChannelId, sections]);
 
   const renderSectionHeader = ({section}: {section: SectionData}) => (
     <View style={[styles.sectionHeader, {borderLeftColor: section.color}]}>
@@ -53,6 +81,7 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
       channel={item}
       isActive={item.id === currentChannelId}
       onPress={onChannelSelect}
+      grabFocus={visible && item.id === currentChannelId}
     />
   );
 
@@ -63,13 +92,14 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
         <Text style={styles.headerTitle}>Canales</Text>
       </View>
       <SectionList
+        ref={listRef}
         sections={sections}
         keyExtractor={item => item.id}
         renderSectionHeader={renderSectionHeader}
         renderItem={renderItem}
         showsVerticalScrollIndicator={false}
         stickySectionHeadersEnabled={false}
-        removeClippedSubviews
+        removeClippedSubviews={false}
       />
     </View>
   );
@@ -79,7 +109,8 @@ const SidebarItem: React.FC<{
   channel: Channel;
   isActive: boolean;
   onPress: (channel: Channel) => void;
-}> = ({channel, isActive, onPress}) => {
+  grabFocus?: boolean;
+}> = ({channel, isActive, onPress, grabFocus}) => {
   const [focused, setFocused] = useState(false);
 
   return (
@@ -91,7 +122,8 @@ const SidebarItem: React.FC<{
       ]}
       onPress={() => onPress(channel)}
       onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}>
+      onBlur={() => setFocused(false)}
+      hasTVPreferredFocus={grabFocus}>
       <View
         style={[styles.itemLogo, isActive && styles.itemLogoActive]}>
         <Text style={styles.itemLogoText}>
