@@ -20,6 +20,8 @@ import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
 
 export interface VideoPlayerHandle {
   togglePlayPause: () => void;
+  mute: () => void;
+  unmute: () => void;
   volumeUp: () => void;
   volumeDown: () => void;
 }
@@ -265,63 +267,86 @@ const INJECTED_JS_BEFORE = `
   true;
 `;
 
-// JS to inject for play/pause toggle - tries multiple approaches
-const TOGGLE_PLAY_PAUSE_JS = `
+// Helper JS function shared across mute/unmute/toggle scripts.
+// It finds all reachable <video> and <audio> elements (including same-origin iframes)
+// and also sends YouTube postMessage commands for cross-origin YouTube iframes.
+const MEDIA_HELPER_JS = `
+function _honeroFindMedia() {
+  var media = Array.from(document.querySelectorAll('video, audio'));
+  // Try same-origin iframes
+  document.querySelectorAll('iframe').forEach(function(iframe) {
+    try {
+      var doc = iframe.contentDocument || iframe.contentWindow.document;
+      if (doc) {
+        media = media.concat(Array.from(doc.querySelectorAll('video, audio')));
+      }
+    } catch(e) { /* cross-origin, skip */ }
+  });
+  return media;
+}
+function _honeroYouTubeCmd(func, args) {
+  document.querySelectorAll('iframe').forEach(function(iframe) {
+    var src = iframe.src || '';
+    if (src.indexOf('youtube') !== -1 || src.indexOf('youtu.be') !== -1) {
+      try {
+        var msg = {event: 'command', func: func};
+        if (args) msg.args = args;
+        iframe.contentWindow.postMessage(JSON.stringify(msg), '*');
+      } catch(e) {}
+    }
+  });
+}
+`;
+
+// Mute all media
+const MUTE_JS = `
 (function() {
-  // Try 1: Find video element on the page
-  var video = document.querySelector('video');
-  if (video) {
-    if (video.paused) { video.play(); } else { video.pause(); }
-    return;
-  }
-  // Try 2: Send spacebar keypress to the focused element / iframe
-  var iframe = document.querySelector('iframe');
-  if (iframe) {
-    // Click center of iframe to toggle (works for most players)
-    try {
-      var rect = iframe.getBoundingClientRect();
-      var evt = new MouseEvent('click', {
-        bubbles: true, cancelable: true,
-        clientX: rect.left + rect.width / 2,
-        clientY: rect.top + rect.height / 2
-      });
-      iframe.dispatchEvent(evt);
-    } catch(e) {}
-    // Also try postMessage for YouTube
-    try {
-      iframe.contentWindow.postMessage(
-        JSON.stringify({event: 'command', func: 'pauseVideo'}),
-        '*'
-      );
-    } catch(e) {}
-  }
+  ${MEDIA_HELPER_JS}
+  var media = _honeroFindMedia();
+  media.forEach(function(m) {
+    m._honeroOldVolume = m.volume;
+    m.muted = true;
+    m.volume = 0;
+  });
+  // YouTube: mute via API
+  _honeroYouTubeCmd('mute');
+  _honeroYouTubeCmd('setVolume', [0]);
 })();
 true;
 `;
 
-// JS to inject for volume change
-function buildVolumeJS(delta: number): string {
-  return `
+// Unmute all media
+const UNMUTE_JS = `
 (function() {
-  var video = document.querySelector('video');
-  if (video) {
-    video.volume = Math.max(0, Math.min(1, video.volume + ${delta}));
-    return;
-  }
-  // Try YouTube iframe API
-  var iframe = document.querySelector('iframe');
-  if (iframe) {
-    try {
-      iframe.contentWindow.postMessage(
-        JSON.stringify({event: 'command', func: '${delta > 0 ? 'setVolume' : 'setVolume'}', args: [${delta > 0 ? 80 : 40}]}),
-        '*'
-      );
-    } catch(e) {}
-  }
+  ${MEDIA_HELPER_JS}
+  var media = _honeroFindMedia();
+  media.forEach(function(m) {
+    m.muted = false;
+    m.volume = m._honeroOldVolume !== undefined ? m._honeroOldVolume : 1;
+  });
+  // YouTube: unmute via API
+  _honeroYouTubeCmd('unMute');
+  _honeroYouTubeCmd('setVolume', [100]);
 })();
 true;
 `;
-}
+
+// Toggle play/pause on all reachable media
+const TOGGLE_PLAY_PAUSE_JS = `
+(function() {
+  ${MEDIA_HELPER_JS}
+  var media = _honeroFindMedia();
+  if (media.length > 0) {
+    media.forEach(function(m) {
+      if (m.paused) { m.play(); } else { m.pause(); }
+    });
+    return;
+  }
+  // Fallback: YouTube postMessage toggle
+  _honeroYouTubeCmd('pauseVideo');
+})();
+true;
+`;
 
 const VideoPlayerInner: React.ForwardRefRenderFunction<
   VideoPlayerHandle,
@@ -336,12 +361,14 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
     togglePlayPause: () => {
       webViewRef.current?.injectJavaScript(TOGGLE_PLAY_PAUSE_JS);
     },
-    volumeUp: () => {
-      webViewRef.current?.injectJavaScript(buildVolumeJS(0.1));
+    mute: () => {
+      webViewRef.current?.injectJavaScript(MUTE_JS);
     },
-    volumeDown: () => {
-      webViewRef.current?.injectJavaScript(buildVolumeJS(-0.1));
+    unmute: () => {
+      webViewRef.current?.injectJavaScript(UNMUTE_JS);
     },
+    volumeUp: () => {},
+    volumeDown: () => {},
   }));
 
   const handleLoadEnd = useCallback(() => {

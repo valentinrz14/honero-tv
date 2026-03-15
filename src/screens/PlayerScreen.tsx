@@ -51,14 +51,14 @@ export const PlayerScreen: React.FC = () => {
 
   const doPause = useCallback(() => {
     if (!paused) {
-      playerRef.current?.togglePlayPause();
+      playerRef.current?.mute();
       setPaused(true);
     }
   }, [paused]);
 
   const doResume = useCallback(() => {
     if (paused) {
-      playerRef.current?.togglePlayPause();
+      playerRef.current?.unmute();
       setPaused(false);
     }
   }, [paused]);
