@@ -16,6 +16,7 @@ interface ChannelCardProps {
   onPress: (channel: Channel) => void;
   size?: 'small' | 'medium' | 'large';
   showCategory?: boolean;
+  hasTVPreferredFocus?: boolean;
 }
 
 export const ChannelCard: React.FC<ChannelCardProps> = ({
@@ -23,6 +24,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   onPress,
   size = 'medium',
   showCategory = false,
+  hasTVPreferredFocus = false,
 }) => {
   const [focused, setFocused] = useState(false);
   const allCategories = useCategories();
@@ -44,6 +46,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       onFocus={() => setFocused(true)}
       onBlur={() => setFocused(false)}
       activeOpacity={0.8}
+      hasTVPreferredFocus={hasTVPreferredFocus}
       style={[
         styles.card,
         {width: dimensions.width, height: dimensions.height},
@@ -82,9 +85,8 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
 const styles = StyleSheet.create({
   card: {
     marginRight: Spacing.md,
-    marginBottom: Spacing.sm,
+    marginVertical: Spacing.sm,
     borderRadius: BorderRadius.lg,
-    overflow: 'hidden',
   },
   cardFocused: {
     transform: [{scale: 1.08}],

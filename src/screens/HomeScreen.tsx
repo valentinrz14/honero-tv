@@ -71,12 +71,13 @@ export const HomeScreen: React.FC = () => {
             horizontal
             data={recentChannels}
             keyExtractor={item => `recent-${item.id}`}
-            renderItem={({item}) => (
+            renderItem={({item, index}) => (
               <ChannelCard
                 channel={item}
                 onPress={handleChannelPress}
                 size="large"
                 showCategory
+                hasTVPreferredFocus={index === 0}
               />
             )}
             showsHorizontalScrollIndicator={false}
@@ -95,12 +96,13 @@ export const HomeScreen: React.FC = () => {
           horizontal
           data={allChannels.slice(0, 6)}
           keyExtractor={item => `featured-${item.id}`}
-          renderItem={({item}) => (
+          renderItem={({item, index}) => (
             <ChannelCard
               channel={item}
               onPress={handleChannelPress}
               size="large"
               showCategory
+              hasTVPreferredFocus={recentChannels.length === 0 && index === 0}
             />
           )}
           showsHorizontalScrollIndicator={false}
