@@ -8,7 +8,7 @@
     "lint": "eslint .",
     "test": "jest",
     "clean": "cd android && ./gradlew clean && cd ..",
-    "build:apk": "cd android && ./gradlew assembleRelease && cd .. && echo '\n✅ APK lista en: android/app/build/outputs/apk/release/app-release.apk'"
+    "build:apk": "cd android && ./gradlew assembleRelease && cd .. && echo '\n✅ APK lista'; open android/app/build/outputs/apk/release"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^1.24.0",
