@@ -364,6 +364,27 @@ const TOGGLE_PLAY_PAUSE_JS = `
 true;
 `;
 
+// JS to check if there's actually media playing in the WebView
+const CHECK_MEDIA_JS = `
+(function() {
+  ${MEDIA_HELPER_JS}
+  var media = _honeroFindMedia();
+  var hasIframe = document.querySelectorAll('iframe').length > 0;
+  var hasVideo = media.length > 0;
+  var isPlaying = media.some(function(m) { return !m.paused && m.readyState >= 2; });
+  window.ReactNativeWebView.postMessage(JSON.stringify({
+    type: 'mediaCheck',
+    hasIframe: hasIframe,
+    hasVideo: hasVideo,
+    isPlaying: isPlaying
+  }));
+})();
+true;
+`;
+
+const STUCK_TIMEOUT_MS = 15000; // 15s to detect stuck state
+const MAX_AUTO_RETRIES = 2;
+
 const VideoPlayerInner: React.ForwardRefRenderFunction<
   VideoPlayerHandle,
   VideoPlayerProps
@@ -373,22 +394,53 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
   const [error, setError] = useState(false);
   const readyRef = useRef(false);
   const errorRef = useRef(false);
+  const autoRetryCount = useRef(0);
+  const stuckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const channelIdRef = useRef(channel.id);
+
+  const clearStuckTimer = useCallback(() => {
+    if (stuckTimerRef.current) {
+      clearTimeout(stuckTimerRef.current);
+      stuckTimerRef.current = null;
+    }
+  }, []);
 
   const setErrorState = useCallback(
     (hasError: boolean) => {
       errorRef.current = hasError;
       setError(hasError);
       onErrorStateChange?.(hasError);
+      if (hasError) {
+        clearStuckTimer();
+      }
     },
-    [onErrorStateChange],
+    [onErrorStateChange, clearStuckTimer],
   );
 
   const handleRetry = useCallback(() => {
     setErrorState(false);
     setLoading(true);
     readyRef.current = false;
+    autoRetryCount.current = 0;
     webViewRef.current?.reload();
   }, [setErrorState]);
+
+  const doAutoRetry = useCallback(() => {
+    if (autoRetryCount.current < MAX_AUTO_RETRIES) {
+      autoRetryCount.current++;
+      console.log(
+        `Auto-retry ${autoRetryCount.current}/${MAX_AUTO_RETRIES} for ${channel.name}`,
+      );
+      readyRef.current = false;
+      setLoading(true);
+      setErrorState(false);
+      webViewRef.current?.reload();
+    } else {
+      // Max retries reached - show error
+      setErrorState(true);
+      setLoading(false);
+    }
+  }, [channel.name, setErrorState]);
 
   useImperativeHandle(ref, () => ({
     togglePlayPause: () => {
@@ -408,22 +460,50 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
 
   // Reset state when channel changes
   useEffect(() => {
+    channelIdRef.current = channel.id;
     readyRef.current = false;
     errorRef.current = false;
+    autoRetryCount.current = 0;
     setLoading(true);
     setError(false);
-  }, [channel.id]);
+    clearStuckTimer();
+  }, [channel.id, clearStuckTimer]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => clearStuckTimer();
+  }, [clearStuckTimer]);
+
+  const startStuckDetection = useCallback(() => {
+    clearStuckTimer();
+    stuckTimerRef.current = setTimeout(() => {
+      // After timeout, check if there's media actually playing
+      if (!readyRef.current && !errorRef.current) {
+        webViewRef.current?.injectJavaScript(CHECK_MEDIA_JS);
+        // Give the check 2s to respond, then force error
+        stuckTimerRef.current = setTimeout(() => {
+          if (!readyRef.current && !errorRef.current) {
+            console.log('Stuck detected - no media found, auto-retrying');
+            doAutoRetry();
+          }
+        }, 2000);
+      }
+    }, STUCK_TIMEOUT_MS);
+  }, [clearStuckTimer, doAutoRetry]);
 
   const handleLoadEnd = useCallback(() => {
     // Page loaded - the injected JS will call cambiarOpcion and send 'playing' message
-    // Set a fallback timeout in case postMessage doesn't fire
+    // Start stuck detection instead of a blind fallback
+    startStuckDetection();
+
+    // Still have a fallback to hide loading if 'playing' message arrives late
     setTimeout(() => {
-      if (!readyRef.current) {
-        readyRef.current = true;
-        setLoading(false);
+      if (!readyRef.current && !errorRef.current) {
+        // Check media before giving up
+        webViewRef.current?.injectJavaScript(CHECK_MEDIA_JS);
       }
     }, 8000);
-  }, []);
+  }, [startStuckDetection]);
 
   const handleMessage = useCallback(
     (event: any) => {
@@ -431,7 +511,23 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
         const data = JSON.parse(event.nativeEvent.data);
         if (data.type === 'playing' && !readyRef.current) {
           readyRef.current = true;
+          clearStuckTimer();
+          autoRetryCount.current = 0;
           setLoading(false);
+        } else if (data.type === 'mediaCheck') {
+          // Response from our media check
+          if (data.hasIframe || data.hasVideo) {
+            // There's media content - consider it loaded
+            if (!readyRef.current) {
+              readyRef.current = true;
+              clearStuckTimer();
+              setLoading(false);
+            }
+          } else if (!readyRef.current && !errorRef.current) {
+            // No media found at all - stuck
+            console.log('Media check: no media found, auto-retrying');
+            doAutoRetry();
+          }
         } else if (data.type === 'error') {
           console.log('VideoPlayer error:', data.message);
           setErrorState(true);
@@ -445,7 +541,7 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
         // ignore
       }
     },
-    [setErrorState],
+    [setErrorState, clearStuckTimer, doAutoRetry],
   );
 
   const handleError = useCallback(
@@ -527,7 +623,7 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
           <Text style={styles.errorIcon}>⚠️</Text>
           <Text style={styles.errorText}>No se pudo cargar el canal</Text>
           <Text style={styles.errorSubtext}>
-            Verificá tu conexión a internet o probá otro canal
+            La señal no responde. Verificá tu conexión o probá otro canal.
           </Text>
           <Pressable
             style={({focused}) => [
