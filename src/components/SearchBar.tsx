@@ -5,7 +5,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Pressable,
   FlatList,
 } from 'react-native';
 import {Channel} from '@/data/channels';
@@ -36,7 +35,8 @@ export const SearchBar: React.FC<SearchBarProps> = ({onChannelSelect}) => {
 
   return (
     <View style={styles.container}>
-      <Pressable
+      <TouchableOpacity
+        activeOpacity={0.8}
         onPress={() => inputRef.current?.focus()}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
@@ -49,8 +49,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({onChannelSelect}) => {
           onChangeText={handleSearch}
           placeholder="Buscar canales..."
           placeholderTextColor={Colors.textMuted}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          focusable={false}
           returnKeyType="search"
         />
         {query.length > 0 && (
@@ -58,7 +57,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({onChannelSelect}) => {
             <Text style={styles.clearButton}>✕</Text>
           </TouchableOpacity>
         )}
-      </Pressable>
+      </TouchableOpacity>
 
       {results.length > 0 && (
         <View style={styles.resultsContainer}>
