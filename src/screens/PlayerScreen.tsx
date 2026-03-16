@@ -1,12 +1,10 @@
 import React, {useState, useCallback, useEffect, useRef} from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   BackHandler,
   useTVEventHandler,
   Animated,
-  TouchableOpacity,
 } from 'react-native';
 import {useRoute, useNavigation, RouteProp} from '@react-navigation/native';
 import {VideoPlayer, VideoPlayerHandle} from '@/components/VideoPlayer';
@@ -14,7 +12,7 @@ import {ChannelSidebar} from '@/components/ChannelSidebar';
 import {Channel} from '@/data/channels';
 import {useChannels} from '@/hooks/useChannels';
 import {addRecentChannel} from '@/utils/storage';
-import {Colors, Spacing, FontSizes, BorderRadius} from '@/theme/colors';
+import {Colors} from '@/theme/colors';
 import {RootStackParamList} from '@/navigation/AppNavigator';
 
 type PlayerRouteProp = RouteProp<RootStackParamList, 'Player'>;
@@ -153,21 +151,6 @@ export const PlayerScreen: React.FC = () => {
             visible={paused}
           />
         </Animated.View>
-
-        {/* Play button in center-right area */}
-        <View style={styles.playButtonArea}>
-          <TouchableOpacity
-            style={styles.playButton}
-            onPress={doResume}
-            activeOpacity={0.7}
-            hasTVPreferredFocus={false}>
-            <View style={styles.playIconContainer}>
-              <Text style={styles.playIcon}>▶</Text>
-            </View>
-            <Text style={styles.playLabel}>{currentChannel.name}</Text>
-            <Text style={styles.pausedLabel}>En pausa</Text>
-          </TouchableOpacity>
-        </View>
       </Animated.View>
     </View>
   );
@@ -187,40 +170,5 @@ const styles = StyleSheet.create({
   sidebarContainer: {
     width: 300,
     height: '100%',
-  },
-  playButtonArea: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  playButton: {
-    alignItems: 'center',
-    padding: Spacing.xl,
-    borderRadius: BorderRadius.xl,
-    backgroundColor: 'rgba(26, 18, 16, 0.6)',
-  },
-  playIconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: Colors.accent,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  playIcon: {
-    fontSize: 36,
-    color: Colors.white,
-    marginLeft: 4,
-  },
-  playLabel: {
-    fontSize: FontSizes.xl,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-    marginBottom: Spacing.xs,
-  },
-  pausedLabel: {
-    fontSize: FontSizes.md,
-    color: Colors.textSecondary,
   },
 });
