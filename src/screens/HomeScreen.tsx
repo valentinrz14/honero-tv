@@ -17,6 +17,7 @@ import {ScraperWebView} from '@/components/ScraperWebView';
 import {Channel} from '@/data/channels';
 import {useChannels, useCategories, useChannelsLoading} from '@/hooks/useChannels';
 import {useRecentChannels, useAddRecentChannel} from '@/hooks/useRecentChannels';
+import {useVoiceSearch} from '@/hooks/useVoiceSearch';
 import {Colors, Spacing, FontSizes} from '@/theme/colors';
 import {RootStackParamList} from '@/navigation/AppNavigator';
 
@@ -37,6 +38,9 @@ export const HomeScreen: React.FC = () => {
     },
     [navigation, addRecent],
   );
+
+  // Google Assistant voice search integration
+  useVoiceSearch(allChannels, handleChannelPress);
 
   const recentChannels = useMemo(
     () =>
@@ -147,6 +151,9 @@ export const HomeScreen: React.FC = () => {
         )}
         showsVerticalScrollIndicator={false}
         removeClippedSubviews
+        initialNumToRender={4}
+        windowSize={5}
+        maxToRenderPerBatch={3}
         contentContainerStyle={styles.content}
       />
     </View>

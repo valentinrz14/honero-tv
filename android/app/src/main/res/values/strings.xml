@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Hornero TV</string>
+    <string name="search_label">Hornero TV</string>
+    <string name="search_hint">Buscar canales…</string>
 </resources>

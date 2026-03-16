@@ -10,7 +10,7 @@ interface CategoryRowProps {
   onChannelPress: (channel: Channel) => void;
 }
 
-export const CategoryRow: React.FC<CategoryRowProps> = ({
+export const CategoryRow: React.FC<CategoryRowProps> = React.memo(({
   category,
   channels,
   onChannelPress,
@@ -39,7 +39,7 @@ export const CategoryRow: React.FC<CategoryRowProps> = ({
       />
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {

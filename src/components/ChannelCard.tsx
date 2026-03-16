@@ -19,7 +19,7 @@ interface ChannelCardProps {
   hasTVPreferredFocus?: boolean;
 }
 
-export const ChannelCard: React.FC<ChannelCardProps> = ({
+export const ChannelCard: React.FC<ChannelCardProps> = React.memo(({
   channel,
   onPress,
   size = 'medium',
@@ -80,7 +80,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       {focused && <View style={styles.focusBorder} />}
     </TouchableOpacity>
   );
-};
+});
 
 const styles = StyleSheet.create({
   card: {
