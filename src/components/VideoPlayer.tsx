@@ -613,7 +613,6 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
           />
           <ActivityIndicator size="large" color={Colors.accent} />
           <Text style={styles.loadingText}>Cargando {channel.name}...</Text>
-          <Text style={styles.loadingSubtext}>Buscando señal...</Text>
         </View>
       )}
 
@@ -679,11 +678,6 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.lg,
     color: Colors.textPrimary,
     marginTop: Spacing.md,
-  },
-  loadingSubtext: {
-    fontSize: FontSizes.sm,
-    color: Colors.textSecondary,
-    marginTop: Spacing.sm,
   },
   errorOverlay: {
     ...StyleSheet.absoluteFillObject,
