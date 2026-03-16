@@ -483,7 +483,6 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
         // Give the check 2s to respond, then force error
         stuckTimerRef.current = setTimeout(() => {
           if (!readyRef.current && !errorRef.current) {
-            console.log('Stuck detected - no media found, auto-retrying');
             doAutoRetry();
           }
         }, 2000);
@@ -525,7 +524,6 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
             }
           } else if (!readyRef.current && !errorRef.current) {
             // No media found at all - stuck
-            console.log('Media check: no media found, auto-retrying');
             doAutoRetry();
           }
         } else if (data.type === 'error') {
@@ -533,7 +531,6 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
           setErrorState(true);
           setLoading(false);
         } else if (data.type === 'geo_blocked') {
-          console.log('VideoPlayer geo-blocked:', data.message);
           setErrorState(true);
           setLoading(false);
         }

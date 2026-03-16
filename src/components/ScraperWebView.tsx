@@ -26,7 +26,6 @@ export const ScraperWebView: React.FC = () => {
       const data = JSON.parse(event.nativeEvent.data);
 
       if (data.type === 'scrape_result') {
-        console.log(`ScraperWebView: received ${data.total} channels`);
         hasScraped.current = true;
         onScrapeResult(data.channels || []);
         setShouldLoad(false);
@@ -41,7 +40,6 @@ export const ScraperWebView: React.FC = () => {
 
   const handleLoadEnd = useCallback(() => {
     if (webViewRef.current && !hasScraped.current) {
-      console.log('ScraperWebView: page loaded, injecting scrape script');
       // Wait for dynamic JS on the page to finish rendering DOM elements
       setTimeout(() => {
         if (webViewRef.current && !hasScraped.current) {
@@ -53,7 +51,6 @@ export const ScraperWebView: React.FC = () => {
 
   const handleError = useCallback((syntheticEvent: any) => {
     const {nativeEvent} = syntheticEvent;
-    console.log('ScraperWebView load error:', nativeEvent?.description);
     onScrapeError(nativeEvent?.description || 'WebView load failed');
   }, []);
 

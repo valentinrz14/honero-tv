@@ -19,17 +19,11 @@ export interface ChannelsData {
  */
 export async function fetchChannelsData(): Promise<ChannelsData> {
   try {
-    console.log('fetchChannelsData: starting WebView scrape...');
     const data = await scrapeChannels();
 
     if (data.channels.length > 0 && data.categories.length > 0) {
-      console.log(
-        `fetchChannelsData: success - ${data.channels.length} channels`,
-      );
       return data;
     }
-
-    console.log('Scraper returned empty data, using fallback');
     return getFallbackData();
   } catch (err) {
     console.log('Error fetching channels:', err);

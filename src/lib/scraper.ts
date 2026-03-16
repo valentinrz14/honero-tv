@@ -282,9 +282,5 @@ function transformScrapedData(rawChannels: RawScrapedChannel[]): {
     categories.push({id, name: country, color: '#5C7B8B', icon: flag});
   });
 
-  console.log(
-    `Scraped ${channels.length} channels in ${categories.length} categories`,
-  );
-
   return {channels, categories};
 }
