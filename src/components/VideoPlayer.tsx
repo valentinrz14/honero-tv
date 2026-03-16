@@ -62,27 +62,19 @@ const BLOCKED_DOMAINS = [
   'monetag.com',
 ];
 
-// CSS to hide pelisjuanita chrome and make player fullscreen
+// Nuclear CSS: hide EVERYTHING, then only show iframe/video
 const FULLSCREEN_CSS = `
-  /* Hide everything except the player area */
-  header, footer, nav, aside,
-  .filtros, .items, .canales-grid, .channel-list,
-  .nota, .about, .watching-card, .search-bar,
-  .helper-links, .actions-row, .server-links,
-  [class*="banner"], [class*="cookie"], [class*="popup"],
-  [class*="social"], [class*="share"], [class*="filtro"],
-  [id*="header"], [id*="footer"], [id*="sidebar"],
-  .breadcrumb, .page-title, .channel-info-box,
-  .ads, .ad, [class*="ad-"], [id*="ad-"],
-  .overlay:not(.player-overlay), .modal, .popup,
-  h1, h2, h3, p, .logo, .menu, .categoria-title,
-  .opciones, .servidores, .btn-group,
-  script[src*="acscdn"], script[src*="aclib"] {
+  /* Hide ALL direct body children */
+  body > * {
     display: none !important;
     visibility: hidden !important;
     height: 0 !important;
+    width: 0 !important;
     overflow: hidden !important;
     pointer-events: none !important;
+    position: absolute !important;
+    top: -9999px !important;
+    left: -9999px !important;
   }
 
   /* Dark background */
@@ -95,18 +87,37 @@ const FULLSCREEN_CSS = `
     height: 100vh !important;
   }
 
-  /* Make the player container fullscreen */
-  .reproductor, .player, .player-container, .video-container,
-  .iframe-container, .embed-responsive, #reproductor, #player {
+  /* Only show elements that contain iframes or videos */
+  body > *:has(iframe),
+  body > *:has(video),
+  body > iframe,
+  body > video {
+    display: block !important;
+    visibility: visible !important;
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
     width: 100vw !important;
     height: 100vh !important;
-    margin: 0 !important;
-    padding: 0 !important;
+    overflow: visible !important;
+    pointer-events: auto !important;
     z-index: 99998 !important;
+  }
+
+  /* Ancestors of iframe/video inside nested containers */
+  body > * > *:has(iframe),
+  body > * > *:has(video),
+  body > * > * > *:has(iframe),
+  body > * > * > *:has(video) {
     display: block !important;
+    visibility: visible !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    overflow: visible !important;
+    z-index: 99998 !important;
   }
 
   /* Make iframes fullscreen */
@@ -121,6 +132,8 @@ const FULLSCREEN_CSS = `
     z-index: 99999 !important;
     border: none !important;
     margin: 0 !important;
+    display: block !important;
+    visibility: visible !important;
   }
 
   /* Fullscreen video elements */
@@ -132,6 +145,8 @@ const FULLSCREEN_CSS = `
     height: 100vh !important;
     z-index: 99999 !important;
     object-fit: contain !important;
+    display: block !important;
+    visibility: visible !important;
   }
 `;
 
@@ -210,14 +225,60 @@ function buildInjectedJS(channel: Channel): string {
     _styleEl.textContent = ${JSON.stringify(FULLSCREEN_CSS)};
     removeAds();
 
+    // Fallback: directly remove non-player elements from DOM
+    // Some WebViews don't support :has() CSS selector
+    setTimeout(function() {
+      var children = Array.from(document.body.children);
+      children.forEach(function(el) {
+        if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.id === 'honero-fullscreen') return;
+        // Keep elements that contain iframe/video or ARE iframe/video
+        if (el.tagName === 'IFRAME' || el.tagName === 'VIDEO') return;
+        if (el.querySelector && (el.querySelector('iframe') || el.querySelector('video'))) return;
+        el.style.display = 'none';
+        el.style.visibility = 'hidden';
+        el.style.height = '0';
+        el.style.overflow = 'hidden';
+      });
+    }, 500);
+
+    // Check for geo-block messages in iframes too
+    function checkGeoBlock() {
+      var bodyText = document.body ? document.body.innerText.toLowerCase() : '';
+      var isGeoBlocked = (
+        (bodyText.indexOf('vpn') !== -1 && (
+          bodyText.indexOf('acceder') !== -1 ||
+          bodyText.indexOf('instalar') !== -1 ||
+          bodyText.indexOf('extensi') !== -1 ||
+          bodyText.indexOf('argentina') !== -1
+        )) ||
+        bodyText.indexOf('sin una vpn') !== -1 ||
+        (bodyText.indexOf('no podr') !== -1 && bodyText.indexOf('acceder') !== -1)
+      );
+      if (isGeoBlocked) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'error',
+          message: 'Canal con restricción geográfica - necesitás VPN'
+        }));
+        return true;
+      }
+      return false;
+    }
+
     // Wait for the iframe/player to be created, then make body visible and notify RN
     setTimeout(function() {
+      // Check geo-block before declaring success
+      if (checkGeoBlock()) return;
+
       // Make body visible - only the player iframe should be showing
       document.body.style.visibility = 'visible';
       removeAds();
 
       window.ReactNativeWebView.postMessage(JSON.stringify({type: 'playing'}));
     }, 1500);
+
+    // Additional geo-block check after content loads in iframes
+    setTimeout(function() { checkGeoBlock(); }, 4000);
+    setTimeout(function() { checkGeoBlock(); }, 8000);
 
     // Watch for new ad elements and detect geo-block messages
     var observerCount = 0;
@@ -231,13 +292,26 @@ function buildInjectedJS(channel: Channel): string {
 
       // Check for geo-block or VPN error messages in the page
       var bodyText = document.body ? document.body.innerText.toLowerCase() : '';
-      if (bodyText.indexOf('vpn') !== -1 && bodyText.indexOf('region') !== -1 ||
-          bodyText.indexOf('not available in your') !== -1 ||
-          bodyText.indexOf('no disponible en tu') !== -1 ||
-          bodyText.indexOf('geo') !== -1 && bodyText.indexOf('block') !== -1) {
+      var isGeoBlocked = (
+        (bodyText.indexOf('vpn') !== -1 && (
+          bodyText.indexOf('region') !== -1 ||
+          bodyText.indexOf('acceder') !== -1 ||
+          bodyText.indexOf('instalar') !== -1 ||
+          bodyText.indexOf('extensi') !== -1 ||
+          bodyText.indexOf('paraguay') !== -1 ||
+          bodyText.indexOf('uruguay') !== -1 ||
+          bodyText.indexOf('argentina') !== -1
+        )) ||
+        bodyText.indexOf('not available in your') !== -1 ||
+        bodyText.indexOf('no disponible en tu') !== -1 ||
+        bodyText.indexOf('sin una vpn') !== -1 ||
+        bodyText.indexOf('no podr') !== -1 && bodyText.indexOf('acceder') !== -1 ||
+        (bodyText.indexOf('geo') !== -1 && bodyText.indexOf('block') !== -1)
+      );
+      if (isGeoBlocked) {
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'error',
-          message: 'Canal con restricción geográfica'
+          message: 'Canal con restricción geográfica - necesitás VPN'
         }));
         observer.disconnect();
       }
@@ -369,12 +443,40 @@ const CHECK_MEDIA_JS = `
 (function() {
   ${MEDIA_HELPER_JS}
   var media = _honeroFindMedia();
-  var hasIframe = document.querySelectorAll('iframe').length > 0;
+
+  // Check for iframes with actual src (not empty/about:blank)
+  var iframes = document.querySelectorAll('iframe');
+  var hasRealIframe = false;
+  for (var i = 0; i < iframes.length; i++) {
+    var src = iframes[i].src || '';
+    if (src && src !== 'about:blank' && src.indexOf('about:') === -1) {
+      hasRealIframe = true;
+      break;
+    }
+  }
+
   var hasVideo = media.length > 0;
   var isPlaying = media.some(function(m) { return !m.paused && m.readyState >= 2; });
+
+  // Also check for geo-block text
+  var bodyText = document.body ? document.body.innerText.toLowerCase() : '';
+  var isGeoBlocked = (
+    bodyText.indexOf('sin una vpn') !== -1 ||
+    (bodyText.indexOf('vpn') !== -1 && bodyText.indexOf('acceder') !== -1) ||
+    (bodyText.indexOf('no podr') !== -1 && bodyText.indexOf('acceder') !== -1)
+  );
+
+  if (isGeoBlocked) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type: 'error',
+      message: 'Canal con restricción geográfica - necesitás VPN'
+    }));
+    return;
+  }
+
   window.ReactNativeWebView.postMessage(JSON.stringify({
     type: 'mediaCheck',
-    hasIframe: hasIframe,
+    hasIframe: hasRealIframe,
     hasVideo: hasVideo,
     isPlaying: isPlaying
   }));
@@ -392,6 +494,7 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
   const webViewRef = useRef<WebView>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const readyRef = useRef(false);
   const errorRef = useRef(false);
   const autoRetryCount = useRef(0);
@@ -406,9 +509,10 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
   }, []);
 
   const setErrorState = useCallback(
-    (hasError: boolean) => {
+    (hasError: boolean, message?: string) => {
       errorRef.current = hasError;
       setError(hasError);
+      setErrorMessage(message || '');
       onErrorStateChange?.(hasError);
       if (hasError) {
         clearStuckTimer();
@@ -528,10 +632,10 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
           }
         } else if (data.type === 'error') {
           console.log('VideoPlayer error:', data.message);
-          setErrorState(true);
+          setErrorState(true, data.message);
           setLoading(false);
         } else if (data.type === 'geo_blocked') {
-          setErrorState(true);
+          setErrorState(true, data.message);
           setLoading(false);
         }
       } catch {
@@ -619,7 +723,7 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
           <Text style={styles.errorIcon}>⚠️</Text>
           <Text style={styles.errorText}>No se pudo cargar el canal</Text>
           <Text style={styles.errorSubtext}>
-            La señal no responde. Verificá tu conexión o probá otro canal.
+            {errorMessage || 'La señal no responde. Verificá tu conexión o probá otro canal.'}
           </Text>
           <Pressable
             style={({focused}) => [
