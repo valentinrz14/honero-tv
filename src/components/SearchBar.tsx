@@ -1,10 +1,11 @@
-import React, {useState, useCallback} from 'react';
+import React, {useState, useCallback, useRef} from 'react';
 import {
   View,
   TextInput,
   Text,
   StyleSheet,
   TouchableOpacity,
+  Pressable,
   FlatList,
 } from 'react-native';
 import {Channel} from '@/data/channels';
@@ -18,6 +19,7 @@ interface SearchBarProps {
 export const SearchBar: React.FC<SearchBarProps> = ({onChannelSelect}) => {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
+  const inputRef = useRef<TextInput>(null);
   const results = useSearchChannels(query);
 
   const handleSearch = useCallback((text: string) => {
@@ -34,9 +36,14 @@ export const SearchBar: React.FC<SearchBarProps> = ({onChannelSelect}) => {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.inputContainer, focused && styles.inputFocused]}>
+      <Pressable
+        onPress={() => inputRef.current?.focus()}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={[styles.inputContainer, focused && styles.inputFocused]}>
         <Text style={styles.searchIcon}>🔍</Text>
         <TextInput
+          ref={inputRef}
           style={styles.input}
           value={query}
           onChangeText={handleSearch}
@@ -51,7 +58,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({onChannelSelect}) => {
             <Text style={styles.clearButton}>✕</Text>
           </TouchableOpacity>
         )}
-      </View>
+      </Pressable>
 
       {results.length > 0 && (
         <View style={styles.resultsContainer}>
