@@ -2,6 +2,7 @@ import React, {
   useState,
   useRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   forwardRef,
 } from 'react';
@@ -11,7 +12,7 @@ import {
   Image,
   StyleSheet,
   ActivityIndicator,
-  TouchableOpacity,
+  Pressable,
 } from 'react-native';
 import {WebView, WebViewNavigation} from 'react-native-webview';
 import {Channel} from '@/data/channels';
@@ -24,11 +25,14 @@ export interface VideoPlayerHandle {
   unmute: () => void;
   volumeUp: () => void;
   volumeDown: () => void;
+  retry: () => void;
+  hasError: () => boolean;
 }
 
 interface VideoPlayerProps {
   channel: Channel;
   onError?: (error: any) => void;
+  onErrorStateChange?: (hasError: boolean) => void;
 }
 
 // Modern user agent to avoid device compatibility issues
@@ -215,16 +219,28 @@ function buildInjectedJS(channel: Channel): string {
       window.ReactNativeWebView.postMessage(JSON.stringify({type: 'playing'}));
     }, 1500);
 
-    // Watch for new ad elements only - limit to 10 firings then stop
+    // Watch for new ad elements and detect geo-block messages
     var observerCount = 0;
     var observer = new MutationObserver(function(mutations) {
       observerCount++;
-      if (observerCount > 10) {
+      if (observerCount > 15) {
         observer.disconnect();
         return;
       }
-      // Only remove ads, don't re-inject CSS (it's already applied)
       removeAds();
+
+      // Check for geo-block or VPN error messages in the page
+      var bodyText = document.body ? document.body.innerText.toLowerCase() : '';
+      if (bodyText.indexOf('vpn') !== -1 && bodyText.indexOf('region') !== -1 ||
+          bodyText.indexOf('not available in your') !== -1 ||
+          bodyText.indexOf('no disponible en tu') !== -1 ||
+          bodyText.indexOf('geo') !== -1 && bodyText.indexOf('block') !== -1) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'error',
+          message: 'Canal con restricción geográfica'
+        }));
+        observer.disconnect();
+      }
     });
     if (document.body) {
       // Only watch direct children, not subtree - avoids YouTube player mutations
@@ -351,11 +367,28 @@ true;
 const VideoPlayerInner: React.ForwardRefRenderFunction<
   VideoPlayerHandle,
   VideoPlayerProps
-> = ({channel, onError}, ref) => {
+> = ({channel, onError, onErrorStateChange}, ref) => {
   const webViewRef = useRef<WebView>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const readyRef = useRef(false);
+  const errorRef = useRef(false);
+
+  const setErrorState = useCallback(
+    (hasError: boolean) => {
+      errorRef.current = hasError;
+      setError(hasError);
+      onErrorStateChange?.(hasError);
+    },
+    [onErrorStateChange],
+  );
+
+  const handleRetry = useCallback(() => {
+    setErrorState(false);
+    setLoading(true);
+    readyRef.current = false;
+    webViewRef.current?.reload();
+  }, [setErrorState]);
 
   useImperativeHandle(ref, () => ({
     togglePlayPause: () => {
@@ -369,7 +402,17 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
     },
     volumeUp: () => {},
     volumeDown: () => {},
+    retry: handleRetry,
+    hasError: () => errorRef.current,
   }));
+
+  // Reset state when channel changes
+  useEffect(() => {
+    readyRef.current = false;
+    errorRef.current = false;
+    setLoading(true);
+    setError(false);
+  }, [channel.id]);
 
   const handleLoadEnd = useCallback(() => {
     // Page loaded - the injected JS will call cambiarOpcion and send 'playing' message
@@ -382,29 +425,36 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
     }, 8000);
   }, []);
 
-  const handleMessage = useCallback((event: any) => {
-    try {
-      const data = JSON.parse(event.nativeEvent.data);
-      if (data.type === 'playing' && !readyRef.current) {
-        readyRef.current = true;
-        setLoading(false);
-      } else if (data.type === 'error') {
-        console.log('VideoPlayer error:', data.message);
-        setError(true);
-        setLoading(false);
+  const handleMessage = useCallback(
+    (event: any) => {
+      try {
+        const data = JSON.parse(event.nativeEvent.data);
+        if (data.type === 'playing' && !readyRef.current) {
+          readyRef.current = true;
+          setLoading(false);
+        } else if (data.type === 'error') {
+          console.log('VideoPlayer error:', data.message);
+          setErrorState(true);
+          setLoading(false);
+        } else if (data.type === 'geo_blocked') {
+          console.log('VideoPlayer geo-blocked:', data.message);
+          setErrorState(true);
+          setLoading(false);
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
-    }
-  }, []);
+    },
+    [setErrorState],
+  );
 
   const handleError = useCallback(
     (syntheticEvent: any) => {
-      setError(true);
+      setErrorState(true);
       setLoading(false);
       onError?.(syntheticEvent.nativeEvent);
     },
-    [onError],
+    [onError, setErrorState],
   );
 
   const handleShouldStartLoad = useCallback((event: WebViewNavigation) => {
@@ -425,12 +475,6 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
     if (isBlocked) return false;
     if (url === 'about:blank') return false;
     return true;
-  }, []);
-
-  const handleRetry = useCallback(() => {
-    setError(false);
-    setLoading(true);
-    webViewRef.current?.reload();
   }, []);
 
   return (
@@ -461,6 +505,7 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
         userAgent={USER_AGENT}
         focusable={false}
         tabIndex={-1}
+        incognito
       />
 
       {/* Loading overlay */}
@@ -482,11 +527,17 @@ const VideoPlayerInner: React.ForwardRefRenderFunction<
           <Text style={styles.errorIcon}>⚠️</Text>
           <Text style={styles.errorText}>No se pudo cargar el canal</Text>
           <Text style={styles.errorSubtext}>
-            Verificá tu conexión a internet
+            Verificá tu conexión a internet o probá otro canal
           </Text>
-          <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
+          <Pressable
+            style={({focused}) => [
+              styles.retryButton,
+              focused && styles.retryButtonFocused,
+            ]}
+            onPress={handleRetry}
+            hasTVPreferredFocus>
             <Text style={styles.retryText}>Reintentar</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
       )}
 
@@ -565,6 +616,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.md,
+    borderWidth: 3,
+    borderColor: 'transparent',
+  },
+  retryButtonFocused: {
+    borderColor: Colors.accent,
+    backgroundColor: Colors.accent,
+    transform: [{scale: 1.1}],
   },
   retryText: {
     fontSize: FontSizes.md,

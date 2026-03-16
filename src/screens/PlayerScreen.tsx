@@ -88,6 +88,12 @@ export const PlayerScreen: React.FC = () => {
     if (!evt) return;
     const type = evt.eventType;
 
+    // If VideoPlayer has an error, don't intercept - let the retry button handle it
+    if (playerRef.current?.hasError()) {
+      // Only handle back navigation when in error state
+      return;
+    }
+
     // DOWN → pause and show overlay
     if (type === 'down' && !paused) {
       doPause();
